@@ -102,8 +102,6 @@ func (r *pReceiver) formatGroups(ctx context.Context, tgs map[string][]*targetgr
 		for _, group := range groups {
 			attrs := pdata.NewAttributeMap()
 
-			//TODO: should we validate name and value?
-			//TODO: find a way to create this labels once, for a group.
 			for name, value := range group.Labels {
 				attrs.InsertString(cleanLabelName(string(name)), string(value))
 			}
@@ -142,7 +140,7 @@ func newPresentResourceMetric(attr pdata.AttributeMap, ts pdata.Timestamp) pdata
 	metric := pdata.NewMetric()
 	metric.SetDataType(pdata.MetricDataTypeIntSum)
 	metric.SetName("present")
-	metric.SetDescription("Clear description of what present means")
+	metric.SetDescription("present represents a target that is expected to exist and be alive")
 	metric.IntSum().DataPoints().Append(newIntDataPoint(1, ts))
 
 	instMetrics := pdata.NewInstrumentationLibraryMetrics()

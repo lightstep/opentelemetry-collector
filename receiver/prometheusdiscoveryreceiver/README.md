@@ -1,8 +1,4 @@
 # Prometheus Discovery Receiver
-
-TODO: UPDATE DOCS!
-
-
 Receives meta labels based on the [Prometheus](https://prometheus.io/) Service Discovery.
 
 Supported pipeline types: metrics (and labels?)
