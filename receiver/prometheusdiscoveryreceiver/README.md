@@ -37,7 +37,7 @@ You can copy and paste that same configuration under:
 
 ```yaml
 receivers:
-  prometheus:
+  prometheus_discovery:
     config:
 ```
 
@@ -45,7 +45,7 @@ For example:
 
 ```yaml
 receivers:
-    prometheus:
+  prometheus_discovery:
       config:
         scrape_configs:
           - job_name: 'otel-collector'

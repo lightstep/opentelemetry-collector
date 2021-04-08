@@ -52,7 +52,7 @@ func TestEndToEnd(t *testing.T) {
 	// default sync time of the discovery channel is 5 seconds.
 	time.Sleep(6 * time.Second)
 
-	dataPoints := cms.AllMetrics()[0].ResourceMetrics().At(0).InstrumentationLibraryMetrics().At(0).Metrics().At(0).IntGauge().DataPoints()
+	dataPoints := cms.AllMetrics()[0].ResourceMetrics().At(0).InstrumentationLibraryMetrics().At(0).Metrics().At(0).IntSum().DataPoints()
 	dataPoints.At(0)
 	// TODO: verify these dataPoints, probably need to fix the formatter.
 }
