@@ -22,10 +22,15 @@ import (
 	"go.opentelemetry.io/collector/consumer/pdata"
 )
 
+const (
+	jobKey      = "job"
+	instanceKey = "instance"
+)
+
 type prometheusDiscoveryProcessor struct {
 	cfg            *Config
 	logger         *zap.Logger
-	attributeCache map[cacheKey]pdata.AttributeMap
+	attributeCache map[*cacheKey]pdata.AttributeMap
 }
 
 type cacheKey struct {
@@ -38,8 +43,9 @@ func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*promethe
 	logger.Info("Prometheus Discovery Processor configured")
 
 	return &prometheusDiscoveryProcessor{
-		cfg:    cfg,
-		logger: logger,
+		cfg:            cfg,
+		logger:         logger,
+		attributeCache: make(map[*cacheKey]pdata.AttributeMap),
 	}, nil
 }
 
@@ -50,21 +56,24 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 	rms := pdm.ResourceMetrics()
 	for i := 0; i < rms.Len(); i++ {
 		rm := rms.At(i)
+
+		pdp.enrichResource(rm.Resource())
+
 		attrs := rm.Resource().Attributes()
 
-		job, ok := attrs.Get("job")
+		job, ok := attrs.Get(jobKey)
 		if !ok {
 			// metric doesn't have 'job' label, ignore it.
 			continue
 		}
 
-		instance, ok := attrs.Get("instance")
+		instance, ok := attrs.Get(instanceKey)
 		if !ok {
 			// metric doesn't have 'instance' label, ignore it.
 			continue
 		}
 
-		key := cacheKey{
+		key := &cacheKey{
 			job:      job.StringVal(),
 			instance: instance.StringVal(),
 		}
@@ -79,19 +88,43 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 					if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
 						pdp.attributeCache[key] = attrs
 					}
-				} else {
-
 				}
-
-				/*
-					if met is an "up" metric
-					  update the attribute cache with the discovered labels
-					else if metric has a job and instance attribute and the cache has a matching entry, e.g., attributeCache[job][instance]
-					  merge attributes from cache with attributes on the metric point
-				*/
 			}
 		}
 	}
 
 	return pdm, nil
+}
+
+// enrichResource inspects the incoming pdata.Resource for job and instance labels. If found, it
+// looks up cached attributes from service discovery, and merge them with the Resources attributes.
+func (pdp *prometheusDiscoveryProcessor) enrichResource(resource pdata.Resource) {
+	key, ok := getCacheKeyForResource(resource)
+	if !ok {
+		return
+	}
+
+	cachedAttributes, ok := pdp.attributeCache[key]
+	if !ok {
+		return
+	}
+
+	cachedAttributes.CopyTo(resource.Attributes())
+}
+
+func getCacheKeyForResource(resource pdata.Resource) (*cacheKey, bool) {
+	jobValue, ok := resource.Attributes().Get(jobKey)
+
+	if !ok {
+		return nil, false
+	}
+
+	instanceValue, ok := resource.Attributes().Get(instanceKey)
+
+	if !ok {
+		return nil, false
+	}
+
+	// @todo: don't assume StringVal will work
+	return &cacheKey{job: jobValue.StringVal(), instance: instanceValue.StringVal()}, false
 }
