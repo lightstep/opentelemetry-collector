@@ -121,7 +121,8 @@ func (r *pReceiver) formatGroups(ctx context.Context, tgs map[string][]*targetgr
 					}
 				}
 
-				tAttrs.InsertString("job", job) //TODO: validate if this is correct.
+				tAttrs.InsertString("job", job)
+				tAttrs.InsertString("source", "prometheus_discovery")
 				tAttrs.InsertString("instance", string(target["__address__"]))
 
 				resourceMetrics.Append(newPresentResourceMetric(tAttrs, ts))
