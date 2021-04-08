@@ -140,10 +140,10 @@ func newPresentResourceMetric(attr pdata.AttributeMap, ts pdata.Timestamp) pdata
 	m.Resource().Attributes()
 
 	metric := pdata.NewMetric()
-	metric.SetDataType(pdata.MetricDataTypeIntGauge)
+	metric.SetDataType(pdata.MetricDataTypeIntSum)
 	metric.SetName("present")
 	metric.SetDescription("Clear description of what present means")
-	metric.IntGauge().DataPoints().Append(newIntDataPoint(1, ts))
+	metric.IntSum().DataPoints().Append(newIntDataPoint(1, ts))
 
 	instMetrics := pdata.NewInstrumentationLibraryMetrics()
 	instMetrics.Metrics().Append(metric)

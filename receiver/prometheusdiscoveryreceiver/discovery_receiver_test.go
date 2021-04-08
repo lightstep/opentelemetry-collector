@@ -139,6 +139,6 @@ func TestFormatter(t *testing.T) {
 		}
 
 		require.Equal(t, "present", metric.Name())
-		require.Equal(t, int64(1), metric.IntGauge().DataPoints().At(0).Value())
+		require.Equal(t, int64(1), metric.IntSum().DataPoints().At(0).Value())
 	}
 }
