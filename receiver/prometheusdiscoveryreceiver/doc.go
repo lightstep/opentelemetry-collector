@@ -12,6 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package prometheusdiscoveryreceiver has the logic for scraping Prometheus metrics from
-// already instrumented applications and then passing them onto a metricsink instance.
+// Package prometheusdiscoveryreceiver has the logic for discovery services and extra labels via
+// the Prometheus Service Discovery mechanism and then passing them onto a metricsink instance.
 package prometheusdiscoveryreceiver

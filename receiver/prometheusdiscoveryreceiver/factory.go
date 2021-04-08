@@ -103,5 +103,5 @@ func createMetricsReceiver(
 	nextConsumer consumer.Metrics,
 ) (component.MetricsReceiver, error) {
 	config := cfg.(*Config)
-	return newPrometheusReceiver(params.Logger, config, nextConsumer), nil
+	return newPrometheusDiscoveryReceiver(params.Logger, config, nextConsumer), nil
 }

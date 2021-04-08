@@ -21,13 +21,12 @@ import (
 	"go.opentelemetry.io/collector/consumer/pdata"
 	"go.opentelemetry.io/collector/receiver/prometheusdiscoveryreceiver/internal"
 	"go.uber.org/zap"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 )
-
-const transport = "http"
 
 // pReceiver is the type that provides Prometheus scraper/receiver functionality.
 type pReceiver struct {
@@ -39,7 +38,7 @@ type pReceiver struct {
 }
 
 // New creates a new prometheus.Receiver reference.
-func newPrometheusReceiver(logger *zap.Logger, cfg *Config, next consumer.Metrics) *pReceiver {
+func newPrometheusDiscoveryReceiver(logger *zap.Logger, cfg *Config, next consumer.Metrics) *pReceiver {
 	pr := &pReceiver{
 		cfg:      cfg,
 		consumer: next,
@@ -48,7 +47,7 @@ func newPrometheusReceiver(logger *zap.Logger, cfg *Config, next consumer.Metric
 	return pr
 }
 
-// Start is the method that starts Prometheus scraping and it
+// Start is the method that starts Prometheus discovery and it
 // is controlled by having previously defined a Configuration using perhaps New.
 func (r *pReceiver) Start(_ context.Context, host component.Host) error {
 	discoveryCtx, cancel := context.WithCancel(context.Background())
@@ -71,16 +70,18 @@ func (r *pReceiver) Start(_ context.Context, host component.Host) error {
 		}
 	}()
 
-	go r.generatePresent(discoveryManager.SyncCh())
+	go r.generatePresent(discoveryCtx, discoveryManager.SyncCh())
 
 	return nil
 }
 
-func (r *pReceiver) generatePresent(syncCh <-chan map[string][]*targetgroup.Group) {
+func (r *pReceiver) generatePresent(ctx context.Context, syncCh <-chan map[string][]*targetgroup.Group) {
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case tgs := <-syncCh:
-			r.formatGroups(tgs)
+			r.formatGroups(ctx, tgs)
 		}
 	}
 }
@@ -91,45 +92,72 @@ func (r *pReceiver) Shutdown(context.Context) error {
 	return nil
 }
 
-func (r *pReceiver) formatGroups(tgs map[string][]*targetgroup.Group) {
-	metric := pdata.NewMetric()
-	metric.SetDataType(pdata.MetricDataTypeIntGauge)
-	metric.SetName("present")
-	metric.SetDescription("Clear description of what present means")
+func (r *pReceiver) formatGroups(ctx context.Context, tgs map[string][]*targetgroup.Group) {
+	ts := pdata.TimestampFromTime(time.Now())
 
-	instMetrics := pdata.NewInstrumentationLibraryMetrics()
-	instMetrics.Metrics().Append(metric)
+	ms := pdata.NewMetrics()
+	resourceMetrics := ms.ResourceMetrics()
 
-	for _, groups := range tgs {
+	for job, groups := range tgs {
 		for _, group := range groups {
-			for _, target := range group.Targets {
-				intDataPoint := pdata.NewIntDataPoint()
-				intDataPoint.SetValue(1)
-				intDataPoint.SetTimestamp(pdata.TimestampFromTime(time.Now()))
-				labels := intDataPoint.LabelsMap()
+			attrs := pdata.NewAttributeMap()
 
-				for name, value := range group.Labels {
-					//TODO: should we validate name and value?
-					//TODO: find a way to create this labels once, for a group.
-					labels.Insert(string(name), string(value))
+			//TODO: should we validate name and value?
+			//TODO: find a way to create this labels once, for a group.
+			for name, value := range group.Labels {
+				attrs.InsertString(cleanLabelName(string(name)), string(value))
+			}
+
+			for _, target := range group.Targets {
+				tAttrs := pdata.NewAttributeMap()
+				attrs.CopyTo(tAttrs)
+
+				for name, value := range target {
+					if string(name) == "__address__" {
+						// The target address is used to identify an instance.
+						tAttrs.InsertString("instance", string(value))
+					} else {
+						tAttrs.InsertString(cleanLabelName(string(name)), string(value))
+					}
 				}
 
-				labels.Insert("job", group.Source) //TODO: validate if this is correct.
-				labels.Insert("instance", string(target["__address__"]))
+				tAttrs.InsertString("job", job) //TODO: validate if this is correct.
+				tAttrs.InsertString("instance", string(target["__address__"]))
 
-				metric.IntGauge().DataPoints().Append(intDataPoint)
+				resourceMetrics.Append(newPresentResourceMetric(tAttrs, ts))
 			}
 		}
 	}
 
-	rscMetrics := pdata.NewResourceMetrics()
-	rscMetrics.InstrumentationLibraryMetrics().Append(instMetrics)
-
-	ms := pdata.NewMetrics()
-	ms.ResourceMetrics().Append(rscMetrics)
-
 	// do some error handling here.
-	// TODO: should we use context.Background?
-	_ = r.consumer.ConsumeMetrics(context.Background(), ms)
+	_ = r.consumer.ConsumeMetrics(ctx, ms)
+}
 
+func newPresentResourceMetric(attr pdata.AttributeMap, ts pdata.Timestamp) pdata.ResourceMetrics {
+	m := pdata.NewResourceMetrics()
+	attr.CopyTo(m.Resource().Attributes())
+	m.Resource().Attributes()
+
+	metric := pdata.NewMetric()
+	metric.SetDataType(pdata.MetricDataTypeIntGauge)
+	metric.SetName("present")
+	metric.SetDescription("Clear description of what present means")
+	metric.IntGauge().DataPoints().Append(newIntDataPoint(1, ts))
+
+	instMetrics := pdata.NewInstrumentationLibraryMetrics()
+	instMetrics.Metrics().Append(metric)
+
+	m.InstrumentationLibraryMetrics().Append(instMetrics)
+	return m
+}
+
+func newIntDataPoint(value int64, timestamp pdata.Timestamp) pdata.IntDataPoint {
+	intDataPoint := pdata.NewIntDataPoint()
+	intDataPoint.SetValue(value)
+	intDataPoint.SetTimestamp(timestamp)
+	return intDataPoint
+}
+
+func cleanLabelName(str string) string {
+	return strings.TrimPrefix(str, "__meta")
 }
