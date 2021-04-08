@@ -3,10 +3,9 @@
 TODO: UPDATE DOCS!
 
 
-Receives metric data in [Prometheus](https://prometheus.io/) format. See the
-[Design](DESIGN.md) for additional information on this receiver.
+Receives meta labels based on the [Prometheus](https://prometheus.io/) Service Discovery.
 
-Supported pipeline types: metrics
+Supported pipeline types: metrics (and labels?)
 
 ## ⚠️ Warning
 
@@ -19,13 +18,14 @@ and please don't use it if the following limitations is a concern:
   scrape the targets multiple times.
 * Users need to configure each replica with different scraping configuration
   if they want to manually shard the scraping.
-* The Prometheus receiver is a stateful component.
 
 ## Getting Started
 
-This receiver is a drop-in replacement for getting Prometheus to scrape your
-services. It supports the full set of Prometheus configuration, including
-service discovery. Just like you would write in a YAML configuration file
+This receiver uses the Prometheus' Service Discovery, to find out targets and fetch
+their metadata. Using this, a `present` metric is generated for every target discovered
+attached with their metadata as labels (e.g., a k8s service discovery can attach the pod name
+or deployment name labels). It supports the full set of Prometheus configuration for discovering
+services. Just like you would write in a YAML configuration file
 before starting Prometheus, such as with:
 
 **Note**: Since the collector configuration supports env variable substitution
