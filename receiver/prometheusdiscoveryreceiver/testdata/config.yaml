@@ -1,10 +1,6 @@
 receivers:
-  prometheus:
-  prometheus/customname:
-    buffer_period: 234
-    buffer_count: 45
-    use_start_time_metric: true
-    start_time_metric_regex: '^(.+_)*process_start_time_seconds$'
+  prometheus_discovery:
+  prometheus_discovery/customname:
     config:
       scrape_configs:
         - job_name: 'demo'
@@ -19,6 +15,6 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [prometheus]
+      receivers: [prometheus_discovery/customname]
       processors: [nop]
       exporters: [nop]

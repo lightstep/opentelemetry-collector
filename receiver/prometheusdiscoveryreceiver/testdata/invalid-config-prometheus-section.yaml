@@ -1,5 +1,5 @@
 receivers:
-  prometheus:
+  prometheus_discovery:
     config:
       use_start_time_metric: true
       scrape_configs:
@@ -15,6 +15,6 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [prometheus]
+      receivers: [prometheus_discovery]
       processors: [nop]
       exporters: [nop]

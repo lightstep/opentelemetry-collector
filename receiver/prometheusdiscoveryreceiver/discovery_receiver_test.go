@@ -41,7 +41,7 @@ func TestEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
-	config := cfg.Receivers["prometheus/discovery"].(*Config)
+	config := cfg.Receivers["prometheus_discovery/discovery"].(*Config)
 
 	cms := new(consumertest.MetricsSink)
 	r := newPrometheusDiscoveryReceiver(logger, config, cms)
