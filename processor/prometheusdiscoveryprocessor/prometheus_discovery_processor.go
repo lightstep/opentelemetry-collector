@@ -23,9 +23,14 @@ import (
 )
 
 type prometheusDiscoveryProcessor struct {
-	cfg    *Config
-	logger *zap.Logger
-	//attributeCache map[string]map[string]pdata.StringMap
+	cfg            *Config
+	logger         *zap.Logger
+	attributeCache map[cacheKey]pdata.AttributeMap
+}
+
+type cacheKey struct {
+	job      string
+	instance string
 }
 
 func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*prometheusDiscoveryProcessor, error) {
@@ -45,11 +50,38 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 	rms := pdm.ResourceMetrics()
 	for i := 0; i < rms.Len(); i++ {
 		rm := rms.At(i)
+		attrs := rm.Resource().Attributes()
+
+		job, ok := attrs.Get("job")
+		if !ok {
+			// metric doesn't have 'job' label, ignore it.
+			continue
+		}
+
+		instance, ok := attrs.Get("instance")
+		if !ok {
+			// metric doesn't have 'instance' label, ignore it.
+			continue
+		}
+
+		key := cacheKey{
+			job:      job.StringVal(),
+			instance: instance.StringVal(),
+		}
+
 		ilms := rm.InstrumentationLibraryMetrics()
 		for j := 0; j < ilms.Len(); j++ {
 			ms := ilms.At(j).Metrics()
 			for k := 0; k < ms.Len(); k++ {
-				//met := ms.At(k)
+				met := ms.At(k)
+
+				if met.Name() == "present" {
+					if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
+						pdp.attributeCache[key] = attrs
+					}
+				} else {
+
+				}
 
 				/*
 					if met is an "up" metric
