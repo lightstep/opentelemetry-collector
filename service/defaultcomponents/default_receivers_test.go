@@ -17,6 +17,7 @@ package defaultcomponents
 import (
 	"context"
 	"errors"
+	"go.opentelemetry.io/collector/receiver/prometheusdiscoveryreceiver"
 	"testing"
 
 	promconfig "github.com/prometheus/prometheus/config"
@@ -63,6 +64,18 @@ func TestDefaultReceivers(t *testing.T) {
 			receiver: "prometheus",
 			getConfigFn: func() config.Receiver {
 				cfg := rcvrFactories["prometheus"].CreateDefaultConfig().(*prometheusreceiver.Config)
+				cfg.PrometheusConfig = &promconfig.Config{
+					ScrapeConfigs: []*promconfig.ScrapeConfig{
+						{JobName: "test"},
+					},
+				}
+				return cfg
+			},
+		},
+		{
+			receiver: "prometheus_discovery",
+			getConfigFn: func() config.Receiver {
+				cfg := rcvrFactories["prometheus_discovery"].CreateDefaultConfig().(*prometheusdiscoveryreceiver.Config)
 				cfg.PrometheusConfig = &promconfig.Config{
 					ScrapeConfigs: []*promconfig.ScrapeConfig{
 						{JobName: "test"},

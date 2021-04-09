@@ -35,7 +35,7 @@ func TestType(t *testing.T) {
 	factory := NewFactory()
 	pType := factory.Type()
 
-	assert.Equal(t, pType, config.Type("prometheusdiscovery"))
+	assert.Equal(t, pType, config.Type("prometheus_discovery"))
 }
 
 func TestCreateDefaultConfig(t *testing.T) {

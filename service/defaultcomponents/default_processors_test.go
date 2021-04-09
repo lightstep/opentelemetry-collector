@@ -84,6 +84,9 @@ func TestDefaultProcessors(t *testing.T) {
 			},
 		},
 		{
+			processor: "prometheus_discovery",
+		},
+		{
 			processor: "span",
 			getConfigFn: func() config.Processor {
 				cfg := procFactories["span"].CreateDefaultConfig().(*spanprocessor.Config)
