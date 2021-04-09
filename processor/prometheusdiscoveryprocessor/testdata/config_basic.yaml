@@ -11,5 +11,5 @@ service:
     pipelines:
         metrics:
             receivers: [nop]
-            processors: [prometheusdiscovery]
+            processors: [prometheus_discovery]
             exporters: [nop]
