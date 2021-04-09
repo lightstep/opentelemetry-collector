@@ -49,9 +49,11 @@ func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*promethe
 	}, nil
 }
 
-// ProcessMetrics looks for "up" metrics and when found will store attributes collected from service
-// discovery. Non "up" metrics with matching job and instance attributes will be enriched with the
-// discovered attributes.
+// ProcessMetrics inspects the Resource on incoming pdata to determine if it came from prometheus
+// discovery or if it contains regular metrics that should be enriched. If the resource has the
+// sentinel attribute `source: prometheus_discovery` along with job and instance attributes, the
+// resource labels are cached. Normal pdata  with matching job and instance attributes will be have
+// their resource enriched with the cached attributes.
 func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm pdata.Metrics) (pdata.Metrics, error) {
 	rms := pdm.ResourceMetrics()
 	for i := 0; i < rms.Len(); i++ {
@@ -68,10 +70,7 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 		if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
 			// attrs came from prometheus_discovery; cache them
 			pdp.attributeCache[key] = attrs
-			continue
-		}
-
-		if cachedAttributes, ok := pdp.attributeCache[key]; ok {
+		} else if cachedAttributes, ok := pdp.attributeCache[key]; ok {
 			// these are "normal" metrics, enrich the resource with cached attrs
 			cachedAttributes.CopyTo(resource.Attributes())
 		}
