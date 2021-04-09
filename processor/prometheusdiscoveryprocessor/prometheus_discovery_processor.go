@@ -77,6 +77,12 @@ func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*promethe
 	}, nil
 }
 
+// ProcessTraces implements the TProcessor interface
+func (pdp *prometheusDiscoveryProcessor) ProcessTraces(_ context.Context, td pdata.Traces) (pdata.Traces, error) {
+	//@todo: implement
+	return td, nil
+}
+
 // ProcessMetrics inspects the Resource on incoming pdata to determine if it came from prometheus
 // discovery or if it contains regular metrics that should be enriched. If the resource has the
 // sentinel attribute `source: prometheus_discovery` along with job and instance attributes, the

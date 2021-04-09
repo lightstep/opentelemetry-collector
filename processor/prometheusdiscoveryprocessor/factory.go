@@ -35,6 +35,7 @@ func NewFactory() component.ProcessorFactory {
 	return processorhelper.NewFactory(
 		typeStr,
 		createDefaultConfig,
+		processorhelper.WithTraces(createTraceProcessor),
 		processorhelper.WithMetrics(createMetricsProcessor))
 }
 
@@ -42,6 +43,23 @@ func createDefaultConfig() config.Processor {
 	return &Config{
 		ProcessorSettings: config.NewProcessorSettings(typeStr),
 	}
+}
+
+func createTraceProcessor(
+	_ context.Context,
+	params component.ProcessorCreateParams,
+	cfg config.Processor,
+	nextConsumer consumer.Traces,
+) (component.TracesProcessor, error) {
+	pdp, err := newPrometheusDiscoveryProcessor(params.Logger, cfg.(*Config))
+	if err != nil {
+		return nil, err
+	}
+	return processorhelper.NewTraceProcessor(
+		cfg,
+		nextConsumer,
+		pdp,
+		processorhelper.WithCapabilities(processorCapabilities))
 }
 
 func createMetricsProcessor(
