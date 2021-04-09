@@ -141,6 +141,7 @@ func newPresentResourceMetric(attr pdata.AttributeMap, ts pdata.Timestamp) pdata
 	metric.SetName("present")
 	metric.SetDescription("present represents a target that is expected to exist and be alive")
 	metric.IntSum().DataPoints().Append(newIntDataPoint(1, ts))
+	metric.IntSum().SetAggregationTemporality(pdata.AggregationTemporalityCumulative)
 
 	instMetrics := pdata.NewInstrumentationLibraryMetrics()
 	instMetrics.Metrics().Append(metric)
