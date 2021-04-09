@@ -34,9 +34,9 @@ import (
 
 const (
 	// The value of "type" key in configuration.
-	typeStr = "prometheus"
+	typeStr = "prometheus_discovery"
 
-	// The key for Prometheus scraping configs.
+	// The key for Prometheus discovery configs.
 	prometheusConfigKey = "config"
 )
 
@@ -103,5 +103,5 @@ func createMetricsReceiver(
 	nextConsumer consumer.Metrics,
 ) (component.MetricsReceiver, error) {
 	config := cfg.(*Config)
-	return newPrometheusReceiver(params.Logger, config, nextConsumer), nil
+	return newPrometheusDiscoveryReceiver(params.Logger, config, nextConsumer), nil
 }

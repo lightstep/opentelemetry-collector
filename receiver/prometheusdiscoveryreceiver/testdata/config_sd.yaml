@@ -1,5 +1,5 @@
 receivers:
-  prometheus:
+  prometheus_discovery:
     config:
       scrape_configs:
       - job_name: file
@@ -80,6 +80,6 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [prometheus]
+      receivers: [prometheus_discovery]
       processors: [nop]
       exporters: [nop]

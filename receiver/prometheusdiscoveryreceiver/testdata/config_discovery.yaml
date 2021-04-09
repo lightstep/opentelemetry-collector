@@ -1,6 +1,5 @@
 receivers:
-  prometheus:
-  prometheus/discovery:
+  prometheus_discovery/discovery:
     config:
       scrape_configs:
         - job_name: 'demo'
@@ -18,6 +17,6 @@ exporters:
 service:
   pipelines:
     traces:
-      receivers: [prometheus]
+      receivers: [prometheus_discovery/discovery]
       processors: [nop]
       exporters: [nop]

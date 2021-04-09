@@ -42,19 +42,17 @@ func TestLoadConfig(t *testing.T) {
 
 	assert.Equal(t, len(cfg.Receivers), 2)
 
-	r0 := cfg.Receivers["prometheus"]
+	r0 := cfg.Receivers["prometheus_discovery"]
 	assert.Equal(t, r0, factory.CreateDefaultConfig())
 
-	r1 := cfg.Receivers["prometheus/customname"].(*Config)
+	r1 := cfg.Receivers["prometheus_discovery/customname"].(*Config)
 	assert.Equal(t, r1.ReceiverSettings,
 		config.ReceiverSettings{
 			TypeVal: typeStr,
-			NameVal: "prometheus/customname",
+			NameVal: "prometheus_discovery/customname",
 		})
 	assert.Equal(t, r1.PrometheusConfig.ScrapeConfigs[0].JobName, "demo")
 	assert.Equal(t, time.Duration(r1.PrometheusConfig.ScrapeConfigs[0].ScrapeInterval), 5*time.Second)
-	assert.Equal(t, r1.UseStartTimeMetric, true)
-	assert.Equal(t, r1.StartTimeMetricRegex, "^(.+_)*process_start_time_seconds$")
 }
 
 func TestLoadConfigWithEnvVar(t *testing.T) {
@@ -71,11 +69,11 @@ func TestLoadConfigWithEnvVar(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
-	r := cfg.Receivers["prometheus"].(*Config)
+	r := cfg.Receivers["prometheus_discovery"].(*Config)
 	assert.Equal(t, r.ReceiverSettings,
 		config.ReceiverSettings{
 			TypeVal: typeStr,
-			NameVal: "prometheus",
+			NameVal: "prometheus_discovery",
 		})
 	assert.Equal(t, r.PrometheusConfig.ScrapeConfigs[0].JobName, jobname)
 	os.Unsetenv(jobnamevar)
@@ -96,11 +94,11 @@ func TestLoadConfigK8s(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
-	r := cfg.Receivers["prometheus"].(*Config)
+	r := cfg.Receivers["prometheus_discovery"].(*Config)
 	assert.Equal(t, r.ReceiverSettings,
 		config.ReceiverSettings{
 			TypeVal: typeStr,
-			NameVal: "prometheus",
+			NameVal: "prometheus_discovery",
 		})
 
 	scrapeConfig := r.PrometheusConfig.ScrapeConfigs[0]
