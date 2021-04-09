@@ -1,0 +1,43 @@
+extensions:
+  health_check:
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+  # Collect own metrics
+  prometheus_discovery:
+    config:
+      scrape_configs:
+        - job_name: 'sampleapp'
+          scrape_interval: 10s
+          static_configs:
+            - targets: [ '127.0.0.1' ]
+              labels:
+                additional_label: additional_value
+
+processors:
+  batch:
+  prometheus_discovery:
+
+exporters:
+  logging:
+    logLevel: debug
+  otlp:
+    endpoint: ingest.staging.lightstep.com:443
+    headers:
+             "lightstep-access-token": ""
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+    metrics:
+      receivers: [prometheus_discovery, otlp]
+      processors: [prometheus_discovery, batch]
+      exporters: [otlp, logging]
+
+  extensions: [health_check]
