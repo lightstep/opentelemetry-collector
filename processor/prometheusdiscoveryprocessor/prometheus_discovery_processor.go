@@ -16,6 +16,7 @@ package prometheusdiscoveryprocessor
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -27,15 +28,42 @@ const (
 	instanceKey = "instance"
 )
 
-type prometheusDiscoveryProcessor struct {
-	cfg            *Config
-	logger         *zap.Logger
-	attributeCache map[*cacheKey]pdata.AttributeMap
-}
-
 type cacheKey struct {
 	job      string
 	instance string
+}
+
+var emptyCacheKey = cacheKey{}
+
+type attributeCache struct {
+	mutex *sync.Mutex
+	cache map[cacheKey]pdata.AttributeMap
+}
+
+func (ac *attributeCache) get(key cacheKey) (pdata.AttributeMap, bool) {
+	ac.mutex.Lock()
+	defer ac.mutex.Unlock()
+	attributes, ok := ac.cache[key]
+	return attributes, ok
+}
+
+func (ac *attributeCache) set(key cacheKey, attributes pdata.AttributeMap) {
+	ac.mutex.Lock()
+	defer ac.mutex.Unlock()
+	ac.cache[key] = attributes
+}
+
+func newAttributeCache() *attributeCache {
+	return &attributeCache{
+		mutex: &sync.Mutex{},
+		cache: make(map[cacheKey]pdata.AttributeMap),
+	}
+}
+
+type prometheusDiscoveryProcessor struct {
+	cfg            *Config
+	logger         *zap.Logger
+	attributeCache *attributeCache
 }
 
 func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*prometheusDiscoveryProcessor, error) {
@@ -45,7 +73,7 @@ func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*promethe
 	return &prometheusDiscoveryProcessor{
 		cfg:            cfg,
 		logger:         logger,
-		attributeCache: make(map[*cacheKey]pdata.AttributeMap),
+		attributeCache: newAttributeCache(),
 	}, nil
 }
 
@@ -69,8 +97,8 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 
 		if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
 			// attrs came from prometheus_discovery; cache them
-			pdp.attributeCache[key] = attrs
-		} else if cachedAttributes, ok := pdp.attributeCache[key]; ok {
+			pdp.attributeCache.set(key, attrs)
+		} else if cachedAttributes, ok := pdp.attributeCache.get(key); ok {
 			// these are "normal" metrics, enrich the resource with cached attrs
 			cachedAttributes.CopyTo(resource.Attributes())
 		}
@@ -80,19 +108,19 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 	return pdm, nil
 }
 
-func getCacheKeyForResource(resource pdata.Resource) (*cacheKey, bool) {
+func getCacheKeyForResource(resource pdata.Resource) (cacheKey, bool) {
 	jobValue, ok := resource.Attributes().Get(jobKey)
 
 	if !ok {
-		return nil, false
+		return emptyCacheKey, false
 	}
 
 	instanceValue, ok := resource.Attributes().Get(instanceKey)
 
 	if !ok {
-		return nil, false
+		return emptyCacheKey, false
 	}
 
 	// @todo: don't assume StringVal will work
-	return &cacheKey{job: jobValue.StringVal(), instance: instanceValue.StringVal()}, true
+	return cacheKey{job: jobValue.StringVal(), instance: instanceValue.StringVal()}, true
 }
