@@ -94,5 +94,5 @@ func getCacheKeyForResource(resource pdata.Resource) (*cacheKey, bool) {
 	}
 
 	// @todo: don't assume StringVal will work
-	return &cacheKey{job: jobValue.StringVal(), instance: instanceValue.StringVal()}, false
+	return &cacheKey{job: jobValue.StringVal(), instance: instanceValue.StringVal()}, true
 }
