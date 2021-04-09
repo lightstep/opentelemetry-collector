@@ -56,52 +56,29 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 	rms := pdm.ResourceMetrics()
 	for i := 0; i < rms.Len(); i++ {
 		rm := rms.At(i)
+		resource := rm.Resource()
+		attrs := resource.Attributes()
 
-		attrs := rm.Resource().Attributes()
+		key, ok := getCacheKeyForResource(resource)
 
-		if key, ok := getCacheKeyForResource(rm.Resource()); ok {
-
-			if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
-				// attrs came from prometheus_discovery; cache them
-				pdp.attributeCache[key] = attrs
-			} else {
-				// these are "normal" metrics, enrich the resource with cached attrs
-				pdp.enrichResource(rm.Resource())
-			}
+		if !ok {
+			continue
 		}
 
-		// I don't think we need to go this deep given that we are just dealing with resources, for now
-		/*
-			ilms := rm.InstrumentationLibraryMetrics()
-			for j := 0; j < ilms.Len(); j++ {
-				ms := ilms.At(j).Metrics()
-				for k := 0; k < ms.Len(); k++ {
-					met := ms.At(k)
-					if met.Name() == "present" {
+		if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
+			// attrs came from prometheus_discovery; cache them
+			pdp.attributeCache[key] = attrs
+			continue
+		}
 
-					}
-				}
-			}
-		*/
+		if cachedAttributes, ok := pdp.attributeCache[key]; ok {
+			// these are "normal" metrics, enrich the resource with cached attrs
+			cachedAttributes.CopyTo(resource.Attributes())
+		}
+
 	}
 
 	return pdm, nil
-}
-
-// enrichResource inspects the incoming pdata.Resource for job and instance labels. If found, it
-// looks up cached attributes from service discovery, and merge them with the Resources attributes.
-func (pdp *prometheusDiscoveryProcessor) enrichResource(resource pdata.Resource) {
-	key, ok := getCacheKeyForResource(resource)
-	if !ok {
-		return
-	}
-
-	cachedAttributes, ok := pdp.attributeCache[key]
-	if !ok {
-		return
-	}
-
-	cachedAttributes.CopyTo(resource.Attributes())
 }
 
 func getCacheKeyForResource(resource pdata.Resource) (*cacheKey, bool) {
