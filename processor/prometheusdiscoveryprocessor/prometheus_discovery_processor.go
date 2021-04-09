@@ -22,10 +22,15 @@ import (
 	"go.opentelemetry.io/collector/consumer/pdata"
 )
 
+const (
+	jobKey      = "job"
+	instanceKey = "instance"
+)
+
 type prometheusDiscoveryProcessor struct {
 	cfg            *Config
 	logger         *zap.Logger
-	attributeCache map[cacheKey]pdata.AttributeMap
+	attributeCache map[*cacheKey]pdata.AttributeMap
 }
 
 type cacheKey struct {
@@ -38,60 +43,56 @@ func newPrometheusDiscoveryProcessor(logger *zap.Logger, cfg *Config) (*promethe
 	logger.Info("Prometheus Discovery Processor configured")
 
 	return &prometheusDiscoveryProcessor{
-		cfg:    cfg,
-		logger: logger,
+		cfg:            cfg,
+		logger:         logger,
+		attributeCache: make(map[*cacheKey]pdata.AttributeMap),
 	}, nil
 }
 
-// ProcessMetrics looks for "up" metrics and when found will store attributes collected from service
-// discovery. Non "up" metrics with matching job and instance attributes will be enriched with the
-// discovered attributes.
+// ProcessMetrics inspects the Resource on incoming pdata to determine if it came from prometheus
+// discovery or if it contains regular metrics that should be enriched. If the resource has the
+// sentinel attribute `source: prometheus_discovery` along with job and instance attributes, the
+// resource labels are cached. Normal pdata  with matching job and instance attributes will be have
+// their resource enriched with the cached attributes.
 func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm pdata.Metrics) (pdata.Metrics, error) {
 	rms := pdm.ResourceMetrics()
 	for i := 0; i < rms.Len(); i++ {
 		rm := rms.At(i)
-		attrs := rm.Resource().Attributes()
+		resource := rm.Resource()
+		attrs := resource.Attributes()
 
-		job, ok := attrs.Get("job")
+		key, ok := getCacheKeyForResource(resource)
+
 		if !ok {
-			// metric doesn't have 'job' label, ignore it.
 			continue
 		}
 
-		instance, ok := attrs.Get("instance")
-		if !ok {
-			// metric doesn't have 'instance' label, ignore it.
-			continue
+		if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
+			// attrs came from prometheus_discovery; cache them
+			pdp.attributeCache[key] = attrs
+		} else if cachedAttributes, ok := pdp.attributeCache[key]; ok {
+			// these are "normal" metrics, enrich the resource with cached attrs
+			cachedAttributes.CopyTo(resource.Attributes())
 		}
 
-		key := cacheKey{
-			job:      job.StringVal(),
-			instance: instance.StringVal(),
-		}
-
-		ilms := rm.InstrumentationLibraryMetrics()
-		for j := 0; j < ilms.Len(); j++ {
-			ms := ilms.At(j).Metrics()
-			for k := 0; k < ms.Len(); k++ {
-				met := ms.At(k)
-
-				if met.Name() == "present" {
-					if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
-						pdp.attributeCache[key] = attrs
-					}
-				} else {
-
-				}
-
-				/*
-					if met is an "up" metric
-					  update the attribute cache with the discovered labels
-					else if metric has a job and instance attribute and the cache has a matching entry, e.g., attributeCache[job][instance]
-					  merge attributes from cache with attributes on the metric point
-				*/
-			}
-		}
 	}
 
 	return pdm, nil
+}
+
+func getCacheKeyForResource(resource pdata.Resource) (*cacheKey, bool) {
+	jobValue, ok := resource.Attributes().Get(jobKey)
+
+	if !ok {
+		return nil, false
+	}
+
+	instanceValue, ok := resource.Attributes().Get(instanceKey)
+
+	if !ok {
+		return nil, false
+	}
+
+	// @todo: don't assume StringVal will work
+	return &cacheKey{job: jobValue.StringVal(), instance: instanceValue.StringVal()}, true
 }
