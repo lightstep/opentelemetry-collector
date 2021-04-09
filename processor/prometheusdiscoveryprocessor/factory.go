@@ -25,7 +25,7 @@ import (
 
 const (
 	// The value of "type" key in configuration.
-	typeStr = "prometheusdiscovery"
+	typeStr = "prometheus_discovery"
 )
 
 var processorCapabilities = component.ProcessorCapabilities{MutatesConsumedData: true}
