@@ -57,40 +57,32 @@ func (pdp *prometheusDiscoveryProcessor) ProcessMetrics(_ context.Context, pdm p
 	for i := 0; i < rms.Len(); i++ {
 		rm := rms.At(i)
 
-		pdp.enrichResource(rm.Resource())
-
 		attrs := rm.Resource().Attributes()
 
-		job, ok := attrs.Get(jobKey)
-		if !ok {
-			// metric doesn't have 'job' label, ignore it.
-			continue
+		if key, ok := getCacheKeyForResource(rm.Resource()); ok {
+
+			if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
+				// attrs came from prometheus_discovery; cache them
+				pdp.attributeCache[key] = attrs
+			} else {
+				// these are "normal" metrics, enrich the resource with cached attrs
+				pdp.enrichResource(rm.Resource())
+			}
 		}
 
-		instance, ok := attrs.Get(instanceKey)
-		if !ok {
-			// metric doesn't have 'instance' label, ignore it.
-			continue
-		}
+		// I don't think we need to go this deep given that we are just dealing with resources, for now
+		/*
+			ilms := rm.InstrumentationLibraryMetrics()
+			for j := 0; j < ilms.Len(); j++ {
+				ms := ilms.At(j).Metrics()
+				for k := 0; k < ms.Len(); k++ {
+					met := ms.At(k)
+					if met.Name() == "present" {
 
-		key := &cacheKey{
-			job:      job.StringVal(),
-			instance: instance.StringVal(),
-		}
-
-		ilms := rm.InstrumentationLibraryMetrics()
-		for j := 0; j < ilms.Len(); j++ {
-			ms := ilms.At(j).Metrics()
-			for k := 0; k < ms.Len(); k++ {
-				met := ms.At(k)
-
-				if met.Name() == "present" {
-					if source, ok := attrs.Get("source"); ok && source.StringVal() == "prometheus_discovery" {
-						pdp.attributeCache[key] = attrs
 					}
 				}
 			}
-		}
+		*/
 	}
 
 	return pdm, nil
