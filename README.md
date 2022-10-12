@@ -1,3 +1,13 @@
+# 🚧 Lightstep's fork of the Open Telemetry Collector 🚧
+> This fork exists to be used as a workbench for some future work. The strategy to sync with upstream is TBD.
+
+## Build Instructions
+1. If you're building on an M1 laptop to then be run as a container on an M1 laptop, use:
+    * `make buildotelcorecol-m1-laptop-local`
+    * `runotelcorecol-m1-laptop-local`
+2. If you're building on an M1 laptop and wish for this to be run as a container on a regular arch (i.e. K8s cluster using amd), use:
+    * `make buildotelcorecol`
+    * `make runotelcorecol` 
 ---
 
 <p align="center">
