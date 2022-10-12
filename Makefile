@@ -441,3 +441,17 @@ checklinks:
 crosslink: 
 	@echo "Executing crosslink"
 	crosslink --root=$(shell pwd) --prune
+
+
+## Custom Commands
+buildotelcorecol-m1-laptop-local:
+	docker build . -t otc-fork --build-arg ENV=m1-laptop-dev
+
+runotelcorecol-m1-laptop-local:
+	docker run otc-fork
+
+buildotelcorecol:
+	docker buildx --platform linux/amd64 . -t otc-fork --build-arg
+
+runotelcorecol:
+	docker run otc-fork
