@@ -17,6 +17,8 @@ package component // import "go.opentelemetry.io/collector/component"
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/sdk/metric/view"
+
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
 )
@@ -69,6 +71,9 @@ type ProcessorFactory interface {
 	// tests of any implementation of the Factory interface.
 	CreateDefaultConfig() config.Processor
 
+	// TODO: document how components can use this register views to the otel-go sdk.
+	GetTelemetryViews() []view.View
+
 	// CreateTracesProcessor creates a TracesProcessor based on this config.
 	// If the processor type does not support tracing or if the config is not valid,
 	// an error will be returned instead.
@@ -99,6 +104,14 @@ type ProcessorCreateDefaultConfigFunc func() config.Processor
 
 // CreateDefaultConfig implements ProcessorFactory.CreateDefaultConfig().
 func (f ProcessorCreateDefaultConfigFunc) CreateDefaultConfig() config.Processor {
+	return f()
+}
+
+// ProcessorGetTelemetryViewsFunc is the equivalent of ProcessorFactory.GetTelemetryViews().
+type ProcessorGetTelemetryViewsFunc func() []view.View
+
+// GetTelemetryViews implements ProcessorFactory.GetTelemetryViews().
+func (f ProcessorGetTelemetryViewsFunc) GetTelemetryViews() []view.View {
 	return f()
 }
 
@@ -173,6 +186,7 @@ type processorFactory struct {
 	metricsStabilityLevel StabilityLevel
 	CreateLogsProcessorFunc
 	logsStabilityLevel StabilityLevel
+	ProcessorGetTelemetryViewsFunc
 }
 
 func (p processorFactory) TracesProcessorStability() StabilityLevel {
@@ -208,6 +222,13 @@ func WithLogsProcessor(createLogsProcessor CreateLogsProcessorFunc, sl Stability
 	return processorFactoryOptionFunc(func(o *processorFactory) {
 		o.logsStabilityLevel = sl
 		o.CreateLogsProcessorFunc = createLogsProcessor
+	})
+}
+
+// TODO: document why components need this.
+func WithTelemetryViews(getMetricsViews ProcessorGetTelemetryViewsFunc) ProcessorFactoryOption {
+	return processorFactoryOptionFunc(func(o *processorFactory) {
+		o.ProcessorGetTelemetryViewsFunc = getMetricsViews
 	})
 }
 
