@@ -81,7 +81,6 @@ func NewExporter(cfg ExporterSettings) *Exporter {
 			attribute.String(obsmetrics.ExporterKey, cfg.ExporterID.String()),
 		},
 	}
-	exp.logger.Info("Made an obsreport exporter", zap.Bool("otel enabled?", exp.useOtelForMetrics))
 	exp.createOtelMetrics()
 
 	return exp
