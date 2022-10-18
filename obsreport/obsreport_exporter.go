@@ -16,22 +16,22 @@ package obsreport // import "go.opentelemetry.io/collector/obsreport"
 
 import (
 	"context"
-	"go.opentelemetry.io/collector/featuregate"
-	"go.opentelemetry.io/collector/internal/obsreportconfig"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/syncint64"
-	"go.opentelemetry.io/otel/metric/unit"
-	"go.uber.org/zap"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/instrument"
+	"go.opentelemetry.io/otel/metric/instrument/syncint64"
+	"go.opentelemetry.io/otel/metric/unit"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configtelemetry"
+	"go.opentelemetry.io/collector/featuregate"
+	"go.opentelemetry.io/collector/internal/obsreportconfig"
 	"go.opentelemetry.io/collector/internal/obsreportconfig/obsmetrics"
 )
 
@@ -228,8 +228,9 @@ func (exp *Exporter) recordWithOC(ctx context.Context, dataType config.DataType,
 		failedMeasure = obsmetrics.ExporterFailedToSendLogRecords
 	}
 
-	stats.Record(
+	_ = stats.RecordWithTags(
 		ctx,
+		exp.mutators,
 		sentMeasure.M(sent),
 		failedMeasure.M(failed))
 }
