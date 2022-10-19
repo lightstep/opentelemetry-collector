@@ -38,7 +38,7 @@ import (
 )
 
 var (
-	scraperName = "scraper"
+	scraperName  = "scraper"
 	scraperScope = scopeName + nameSep + scraperName
 )
 
@@ -50,13 +50,13 @@ type Scraper struct {
 	mutators   []tag.Mutator
 	tracer     trace.Tracer
 
-	meter          metric.Meter
-	logger         *zap.Logger
+	meter  metric.Meter
+	logger *zap.Logger
 
-	useOtelForMetrics bool
-	otelAttrs         []attribute.KeyValue
-	scrapedMetricsPoints   syncint64.Counter
-	erroredMetricsPoints   syncint64.Counter
+	useOtelForMetrics    bool
+	otelAttrs            []attribute.KeyValue
+	scrapedMetricsPoints syncint64.Counter
+	erroredMetricsPoints syncint64.Counter
 }
 
 // ScraperSettings are settings for creating a Scraper.
@@ -68,7 +68,7 @@ type ScraperSettings struct {
 
 // NewScraper creates a new Scraper.
 func NewScraper(cfg ScraperSettings) *Scraper {
-	return &Scraper{
+	scraper := &Scraper{
 		level:      cfg.ReceiverCreateSettings.TelemetrySettings.MetricsLevel,
 		receiverID: cfg.ReceiverID,
 		scraper:    cfg.Scraper,
@@ -77,16 +77,18 @@ func NewScraper(cfg ScraperSettings) *Scraper {
 			tag.Upsert(obsmetrics.TagKeyScraper, cfg.Scraper.String(), tag.WithTTL(tag.TTLNoPropagation))},
 		tracer: cfg.ReceiverCreateSettings.TracerProvider.Tracer(cfg.Scraper.String()),
 
-		meter: cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope),
-		logger: cfg.ReceiverCreateSettings.Logger,
+		meter:             cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope),
+		logger:            cfg.ReceiverCreateSettings.Logger,
 		useOtelForMetrics: featuregate.GetRegistry().IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
 		otelAttrs: []attribute.KeyValue{
 			attribute.String(obsmetrics.ReceiverKey, cfg.ReceiverID.String()),
 			attribute.String(obsmetrics.ScraperKey, cfg.Scraper.String()),
 		},
 	}
-}
 
+	scraper.createOtelMetrics()
+	return scraper
+}
 
 func (s *Scraper) createOtelMetrics() {
 	if !s.useOtelForMetrics {
