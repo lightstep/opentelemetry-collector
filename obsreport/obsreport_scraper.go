@@ -50,7 +50,6 @@ type Scraper struct {
 	mutators   []tag.Mutator
 	tracer     trace.Tracer
 
-	meter  metric.Meter
 	logger *zap.Logger
 
 	useOtelForMetrics    bool
@@ -77,7 +76,6 @@ func NewScraper(cfg ScraperSettings) *Scraper {
 			tag.Upsert(obsmetrics.TagKeyScraper, cfg.Scraper.String(), tag.WithTTL(tag.TTLNoPropagation))},
 		tracer: cfg.ReceiverCreateSettings.TracerProvider.Tracer(cfg.Scraper.String()),
 
-		meter:             cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope),
 		logger:            cfg.ReceiverCreateSettings.Logger,
 		useOtelForMetrics: featuregate.GetRegistry().IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
 		otelAttrs: []attribute.KeyValue{
@@ -86,11 +84,12 @@ func NewScraper(cfg ScraperSettings) *Scraper {
 		},
 	}
 
-	scraper.createOtelMetrics()
+	meter := cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope)
+	scraper.createOtelMetrics(meter)
 	return scraper
 }
 
-func (s *Scraper) createOtelMetrics() {
+func (s *Scraper) createOtelMetrics(meter metric.Meter) {
 	if !s.useOtelForMetrics {
 		return
 	}
@@ -102,14 +101,14 @@ func (s *Scraper) createOtelMetrics() {
 		}
 	}
 
-	s.scrapedMetricsPoints, err = s.meter.SyncInt64().Counter(
+	s.scrapedMetricsPoints, err = meter.SyncInt64().Counter(
 		obsmetrics.ScraperPrefix+obsmetrics.ScrapedMetricPointsKey,
 		instrument.WithDescription("Number of metric points successfully scraped."),
 		instrument.WithUnit(unit.Dimensionless),
 	)
 	handleError(obsmetrics.ScraperPrefix+obsmetrics.ScrapedMetricPointsKey, err)
 
-	s.erroredMetricsPoints, err = s.meter.SyncInt64().Counter(
+	s.erroredMetricsPoints, err = meter.SyncInt64().Counter(
 		obsmetrics.ScraperPrefix+obsmetrics.ErroredMetricPointsKey,
 		instrument.WithDescription("Number of metric points that were unable to be scraped."),
 		instrument.WithUnit(unit.Dimensionless),
