@@ -20,8 +20,13 @@ import (
 	"reflect"
 	"sort"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
+	"go.opentelemetry.io/otel/attribute"
+	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.uber.org/multierr"
@@ -49,8 +54,10 @@ var (
 
 type TestTelemetry struct {
 	component.TelemetrySettings
-	SpanRecorder *tracetest.SpanRecorder
-	views        []*view.View
+	SpanRecorder       *tracetest.SpanRecorder
+	OtelMetricsFetcher *OtelMetricsFetcher
+	views              []*view.View
+	mp                 *sdkmetric.MeterProvider
 }
 
 // ToExporterCreateSettings returns ExporterCreateSettings with configured TelemetrySettings
@@ -77,7 +84,7 @@ func (tts *TestTelemetry) ToReceiverCreateSettings() component.ReceiverCreateSet
 // Shutdown unregisters any views and shuts down the SpanRecorder
 func (tts *TestTelemetry) Shutdown(ctx context.Context) error {
 	view.Unregister(tts.views...)
-	return tts.SpanRecorder.Shutdown(ctx)
+	return multierr.Combine(tts.SpanRecorder.Shutdown(ctx), tts.mp.Shutdown(ctx))
 }
 
 // SetupTelemetry does setup the testing environment to check the metrics recorded by receivers, producers or exporters.
@@ -98,6 +105,18 @@ func SetupTelemetry() (TestTelemetry, error) {
 	if err != nil {
 		return settings, err
 	}
+
+	exporter := otelprom.New()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(exporter.Collector); err != nil {
+		return settings, err
+	}
+	settings.TelemetrySettings.MeterProvider = mp
+	settings.OtelMetricsFetcher = &OtelMetricsFetcher{promHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{})}
+	// used during shutting down
+	settings.mp = mp
 
 	return settings, err
 }
@@ -267,4 +286,16 @@ func sortTags(tags []tag.Tag) {
 	sort.SliceStable(tags, func(i, j int) bool {
 		return tags[i].Key.Name() < tags[j].Key.Name()
 	})
+}
+
+// attributesForReceiverView returns the attributes that are needed for the receiver metrics.
+func attributesForReceiverView(receiver config.ComponentID, transport string) []attribute.KeyValue {
+	tags := make([]attribute.KeyValue, 0, 2)
+
+	tags = append(tags, attribute.String(receiverTag.Name(), receiver.String()))
+	if transport != "" {
+		tags = append(tags, attribute.String(transportTag.Name(), transport))
+	}
+
+	return tags
 }

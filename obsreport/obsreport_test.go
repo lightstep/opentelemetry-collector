@@ -98,6 +98,36 @@ func TestReceiveTraceDataOp(t *testing.T) {
 	require.NoError(t, obsreporttest.CheckReceiverTraces(tt, receiver, transport, int64(acceptedSpans), int64(refusedSpans)))
 }
 
+func TestReceiveTraceDataOpWithOtelMetrics(t *testing.T) {
+	tt, err := obsreporttest.SetupTelemetry()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	ctx := context.Background()
+
+	params := []testParams{
+		{items: 13, err: errFake},
+		{items: 42, err: nil},
+	}
+	for i, param := range params {
+		rec := NewReceiver(ReceiverSettings{
+			ReceiverID:             receiver,
+			Transport:              transport,
+			ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+		})
+
+		// Force Receiver to use Otel
+		rec.useOtelForMetrics = true
+		rec.createOtelMetrics()
+
+		ctx := rec.StartTracesOp(ctx)
+		assert.NotNil(t, ctx)
+		rec.EndTracesOp(ctx, format, params[i].items, param.err)
+	}
+
+	require.NoError(t, tt.OtelMetricsFetcher.CheckReceiverTraces(receiver, transport, int64(42), int64(13)))
+}
+
 func TestReceiveLogsOp(t *testing.T) {
 	tt, err := obsreporttest.SetupTelemetry()
 	require.NoError(t, err)
