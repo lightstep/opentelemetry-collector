@@ -16,10 +16,8 @@ package plogotlp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
-	"strings"
 	"sync"
 	"testing"
 
@@ -33,52 +31,6 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/plog"
 )
-
-var _ json.Unmarshaler = Response{}
-var _ json.Marshaler = Response{}
-
-var _ json.Unmarshaler = Request{}
-var _ json.Marshaler = Request{}
-
-var logsRequestJSON = []byte(`
-	{
-		"resourceLogs": [
-		{
-			"resource": {},
-			"scopeLogs": [
-				{
-					"scope": {},
-					"logRecords": [
-						{
-							"body": {
-								"stringValue": "test_log_record"
-							},
-							"traceId": "",
-							"spanId": ""
-						}
-					]
-				}
-			]
-		}
-		]
-	}`)
-
-func TestRequestToPData(t *testing.T) {
-	tr := NewRequest()
-	assert.Equal(t, tr.Logs().LogRecordCount(), 0)
-	tr.Logs().ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
-	assert.Equal(t, tr.Logs().LogRecordCount(), 1)
-}
-
-func TestRequestJSON(t *testing.T) {
-	lr := NewRequest()
-	assert.NoError(t, lr.UnmarshalJSON(logsRequestJSON))
-	assert.Equal(t, "test_log_record", lr.Logs().ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).Body().AsString())
-
-	got, err := lr.MarshalJSON()
-	assert.NoError(t, err)
-	assert.Equal(t, strings.Join(strings.Fields(string(logsRequestJSON)), ""), string(got))
-}
 
 func TestGrpc(t *testing.T) {
 	lis := bufconn.Listen(1024 * 1024)
@@ -106,7 +58,7 @@ func TestGrpc(t *testing.T) {
 		assert.NoError(t, cc.Close())
 	})
 
-	logClient := NewClient(cc)
+	logClient := NewGRPCClient(cc)
 
 	resp, err := logClient.Export(context.Background(), generateLogsRequest())
 	assert.NoError(t, err)
@@ -139,7 +91,7 @@ func TestGrpcError(t *testing.T) {
 		assert.NoError(t, cc.Close())
 	})
 
-	logClient := NewClient(cc)
+	logClient := NewGRPCClient(cc)
 	resp, err := logClient.Export(context.Background(), generateLogsRequest())
 	require.Error(t, err)
 	st, okSt := status.FromError(err)

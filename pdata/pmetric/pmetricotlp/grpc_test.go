@@ -16,10 +16,8 @@ package pmetricotlp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net"
-	"strings"
 	"sync"
 	"testing"
 
@@ -33,48 +31,6 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/pmetric"
 )
-
-var _ json.Unmarshaler = Response{}
-var _ json.Marshaler = Response{}
-
-var _ json.Unmarshaler = Request{}
-var _ json.Marshaler = Request{}
-
-var metricsRequestJSON = []byte(`
-	{
-		"resourceMetrics": [
-			{
-				"resource": {},
-				"scopeMetrics": [
-					{
-						"scope": {},
-						"metrics": [
-							{
-								"name": "test_metric"
-							}
-						]
-					}
-				]
-			}
-		]
-	}`)
-
-func TestRequestToPData(t *testing.T) {
-	tr := NewRequest()
-	assert.Equal(t, tr.Metrics().MetricCount(), 0)
-	tr.Metrics().ResourceMetrics().AppendEmpty().ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
-	assert.Equal(t, tr.Metrics().MetricCount(), 1)
-}
-
-func TestRequestJSON(t *testing.T) {
-	mr := NewRequest()
-	assert.NoError(t, mr.UnmarshalJSON(metricsRequestJSON))
-	assert.Equal(t, "test_metric", mr.Metrics().ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Name())
-
-	got, err := mr.MarshalJSON()
-	assert.NoError(t, err)
-	assert.Equal(t, strings.Join(strings.Fields(string(metricsRequestJSON)), ""), string(got))
-}
 
 func TestGrpc(t *testing.T) {
 	lis := bufconn.Listen(1024 * 1024)
@@ -102,7 +58,7 @@ func TestGrpc(t *testing.T) {
 		assert.NoError(t, cc.Close())
 	})
 
-	logClient := NewClient(cc)
+	logClient := NewGRPCClient(cc)
 
 	resp, err := logClient.Export(context.Background(), generateMetricsRequest())
 	assert.NoError(t, err)
@@ -135,7 +91,7 @@ func TestGrpcError(t *testing.T) {
 		assert.NoError(t, cc.Close())
 	})
 
-	logClient := NewClient(cc)
+	logClient := NewGRPCClient(cc)
 	resp, err := logClient.Export(context.Background(), generateMetricsRequest())
 	require.Error(t, err)
 	st, okSt := status.FromError(err)
