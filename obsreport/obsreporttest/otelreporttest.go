@@ -49,21 +49,6 @@ func (mf *OtelMetricsFetcher) CheckReceiverMetrics(receiver config.ComponentID, 
 		mf.CheckCounter("receiver_refused_metric_points", droppedMetricPoints, receiverAttrs))
 }
 
-// CheckGauge compares the value for a given metric and a set of attributes,
-// if the gauge value matches with the exported value by the OpenTelemetry Go SDK.
-func (mf *OtelMetricsFetcher) CheckGauge(metric string, value float64, attrs []attribute.KeyValue) error {
-	ts, err := mf.getMetric(metric, io_prometheus_client.MetricType_GAUGE, attrs)
-	if err != nil {
-		return err
-	}
-
-	if ts.GetGauge().GetValue() != value {
-		return fmt.Errorf("values for metric %s did no match, wanted %f got %f", metric, value, ts.GetGauge().GetValue())
-	}
-
-	return nil
-}
-
 // CheckCounter compares the value for a given metric and a set of attributes,
 // if the counter value matches with the exported value by the OpenTelemetry Go SDK.
 func (mf *OtelMetricsFetcher) CheckCounter(metric string, value int64, attrs []attribute.KeyValue) error {
@@ -73,7 +58,6 @@ func (mf *OtelMetricsFetcher) CheckCounter(metric string, value int64, attrs []a
 	}
 
 	fv := float64(value)
-
 	if ts.GetCounter().GetValue() != fv {
 		return fmt.Errorf("values for metric %s did no match, wanted %f got %f", metric, fv, ts.GetCounter().GetValue())
 	}
@@ -83,65 +67,48 @@ func (mf *OtelMetricsFetcher) CheckCounter(metric string, value int64, attrs []a
 
 // getMetric returns the metric time series that matches the given name, type and set of attributes
 // it fetches data from the prometheus endpoint and parse them, ideally OTel Go should provide a MeterRecorder of some kind.
-func (mf *OtelMetricsFetcher) getMetric(metric string, mType io_prometheus_client.MetricType, attrs []attribute.KeyValue) (*io_prometheus_client.Metric, error) {
-	metrics, err := mf.fetchData()
+func (mf *OtelMetricsFetcher) getMetric(expectedName string, expectedType io_prometheus_client.MetricType, expectedAttrs []attribute.KeyValue) (*io_prometheus_client.Metric, error) {
+	parsed, err := fetchPrometheusMetrics(mf.promHandler)
 	if err != nil {
 		return nil, err
 	}
 
-	exp, ok := metrics[metric]
+	metricFamily, ok := parsed[expectedName]
 	if !ok {
-		return nil, fmt.Errorf("metric %s not found", metric)
+		return nil, fmt.Errorf("metric '%s' not found", expectedName)
 	}
 
-	if exp.metric.Type.String() != mType.String() {
-		return nil, fmt.Errorf("metric %v is of type %s and not %s", metric, exp.metric.GetType().String(), mType.String())
+	if metricFamily.Type.String() != expectedType.String() {
+		return nil, fmt.Errorf("metric '%v' has type '%s' instead of '%s'", expectedName, metricFamily.Type.String(), expectedType.String())
 	}
 
-	set := attribute.NewSet(attrs...)
-	ts, ok := exp.timeseries[set]
-	if !ok {
-		return nil, fmt.Errorf("metric %s doesn'mType have a metric with the following attributes: %s", set.Encoded(attribute.DefaultEncoder()))
+	expectedSet := attribute.NewSet(expectedAttrs...)
+
+	for _, metric := range metricFamily.Metric {
+		var attrs []attribute.KeyValue
+
+		for _, label := range metric.Label {
+			attrs = append(attrs, attribute.String(label.GetName(), label.GetValue()))
+		}
+		set := attribute.NewSet(attrs...)
+
+		if expectedSet.Equals(&set) {
+			return metric, nil
+		}
 	}
 
-	return ts, nil
+	return nil, fmt.Errorf("metric '%s' doesn't have a timeseries with the given attributes: %s", expectedName, expectedSet.Encoded(attribute.DefaultEncoder()))
 }
 
-func (mf *OtelMetricsFetcher) fetchData() (map[string]exportedMetric, error) {
+func fetchPrometheusMetrics(handler http.Handler) (map[string]*io_prometheus_client.MetricFamily, error) {
 	req, err := http.NewRequest("GET", "/metrics", nil)
 	if err != nil {
 		return nil, err
 	}
 
 	rr := httptest.NewRecorder()
-	mf.promHandler.ServeHTTP(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	var parser expfmt.TextParser
-	parsed, err := parser.TextToMetricFamilies(rr.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	ms := make(map[string]exportedMetric)
-	for _, metricFamily := range parsed {
-		m := exportedMetric{
-			metric:     metricFamily,
-			timeseries: make(map[attribute.Set]*io_prometheus_client.Metric),
-		}
-
-		for _, metric := range metricFamily.Metric {
-			var attrs []attribute.KeyValue
-
-			for _, label := range metric.Label {
-				attrs = append(attrs, attribute.String(label.GetName(), label.GetValue()))
-			}
-			set := attribute.NewSet(attrs...)
-
-			m.timeseries[set] = metric
-		}
-
-		ms[metricFamily.GetName()] = m
-	}
-
-	return ms, nil
+	return parser.TextToMetricFamilies(rr.Body)
 }
