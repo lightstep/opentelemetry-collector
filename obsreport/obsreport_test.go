@@ -50,6 +50,12 @@ type testParams struct {
 	err   error
 }
 
+type otelTestParams struct {
+	dt    config.DataType
+	items int
+	err   error
+}
+
 func TestReceiveTraceDataOp(t *testing.T) {
 	tt, err := obsreporttest.SetupTelemetry()
 	require.NoError(t, err)
@@ -193,6 +199,55 @@ func TestReceiveMetricsOp(t *testing.T) {
 	}
 
 	require.NoError(t, obsreporttest.CheckReceiverMetrics(tt, receiver, transport, int64(acceptedMetricPoints), int64(refusedMetricPoints)))
+}
+
+func TestReceiverMetricsWithOtel(t *testing.T) {
+	tt, err := obsreporttest.SetupTelemetry()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	ctx := context.Background()
+
+	params := []otelTestParams{
+		{dt: config.TracesDataType, items: 13, err: errFake},
+		{dt: config.TracesDataType, items: 42, err: nil},
+		{dt: config.MetricsDataType, items: 41, err: errFake},
+		{dt: config.MetricsDataType, items: 7, err: nil},
+		{dt: config.LogsDataType, items: 35, err: errFake},
+		{dt: config.LogsDataType, items: 102, err: nil},
+	}
+	for i, param := range params {
+		rec := NewReceiver(ReceiverSettings{
+			ReceiverID:             receiver,
+			Transport:              transport,
+			ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+		})
+
+		// Force Receiver to use otel
+		rec.useOtelForMetrics = true
+		rec.createOtelMetrics()
+
+		switch param.dt {
+		case config.TracesDataType:
+			ctx := rec.StartTracesOp(ctx)
+			assert.NotNil(t, ctx)
+			rec.EndTracesOp(ctx, format, params[i].items, param.err)
+
+		case config.MetricsDataType:
+			ctx := rec.StartMetricsOp(ctx)
+			assert.NotNil(t, ctx)
+			rec.EndMetricsOp(ctx, format, params[i].items, param.err)
+
+		case config.LogsDataType:
+			ctx := rec.StartLogsOp(ctx)
+			assert.NotNil(t, ctx)
+			rec.EndLogsOp(ctx, format, params[i].items, param.err)
+		}
+	}
+
+	require.NoError(t, tt.OtelPrometheusChecker.CheckReceiverTraces(receiver, transport, int64(42), int64(13)))
+	require.NoError(t, tt.OtelPrometheusChecker.CheckReceiverMetrics(receiver, transport, int64(7), int64(41)))
+	require.NoError(t, tt.OtelPrometheusChecker.CheckReceiverLogs(receiver, transport, int64(102), int64(35)))
 }
 
 func TestScrapeMetricsDataOp(t *testing.T) {

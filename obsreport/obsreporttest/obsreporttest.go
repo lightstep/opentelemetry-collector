@@ -20,8 +20,13 @@ import (
 	"reflect"
 	"sort"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opencensus.io/stats/view"
 	"go.opencensus.io/tag"
+	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.uber.org/multierr"
@@ -51,6 +56,9 @@ type TestTelemetry struct {
 	component.TelemetrySettings
 	SpanRecorder *tracetest.SpanRecorder
 	views        []*view.View
+
+	OtelPrometheusChecker PrometheusChecker
+	meterProvider         *sdkmetric.MeterProvider
 }
 
 // ToExporterCreateSettings returns ExporterCreateSettings with configured TelemetrySettings
@@ -77,7 +85,10 @@ func (tts *TestTelemetry) ToReceiverCreateSettings() component.ReceiverCreateSet
 // Shutdown unregisters any views and shuts down the SpanRecorder
 func (tts *TestTelemetry) Shutdown(ctx context.Context) error {
 	view.Unregister(tts.views...)
-	return tts.SpanRecorder.Shutdown(ctx)
+	return multierr.Combine(
+		tts.SpanRecorder.Shutdown(ctx),
+		tts.meterProvider.Shutdown(ctx),
+	)
 }
 
 // SetupTelemetry does setup the testing environment to check the metrics recorded by receivers, producers or exporters.
@@ -98,6 +109,19 @@ func SetupTelemetry() (TestTelemetry, error) {
 	if err != nil {
 		return settings, err
 	}
+
+	exporter := otelprom.New()
+	settings.meterProvider = sdkmetric.NewMeterProvider(
+		sdkmetric.WithResource(resource.Empty()),
+		sdkmetric.WithReader(exporter),
+	)
+	settings.TelemetrySettings.MeterProvider = settings.meterProvider
+
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(exporter.Collector); err != nil {
+		return settings, err
+	}
+	settings.OtelPrometheusChecker = PrometheusChecker{promHandler: promhttp.HandlerFor(reg, promhttp.HandlerOpts{})}
 
 	return settings, err
 }
