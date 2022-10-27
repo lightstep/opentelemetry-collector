@@ -23,8 +23,6 @@ import (
 	"sync"
 	"unicode"
 
-	otelview "go.opentelemetry.io/otel/sdk/metric/view"
-
 	ocprom "contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,6 +36,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	otelview "go.opentelemetry.io/otel/sdk/metric/view"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.uber.org/zap"
 
