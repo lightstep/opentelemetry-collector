@@ -23,6 +23,8 @@ import (
 	"sync"
 	"unicode"
 
+	otelview "go.opentelemetry.io/otel/sdk/metric/view"
+
 	ocprom "contrib.go.opencensus.io/exporter/prometheus"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
@@ -229,6 +231,14 @@ func (tel *telemetryInitializer) initOpenTelemetry(attrs map[string]string, prom
 		resAttrs = append(resAttrs, attribute.String(k, v))
 	}
 
+	var views []otelview.View
+
+	batchViews, err := batchprocessor.OtelMetricsViews()
+	if err != nil {
+		return fmt.Errorf("error creating otel metrics views for batch processor: %w", err)
+	}
+	views = append(views, batchViews...)
+
 	res, err := resource.New(context.Background(), resource.WithAttributes(resAttrs...))
 	if err != nil {
 		return fmt.Errorf("error creating otel resources: %w", err)
@@ -241,7 +251,7 @@ func (tel *telemetryInitializer) initOpenTelemetry(attrs map[string]string, prom
 	}
 	tel.mp = sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),
-		sdkmetric.WithReader(exporter),
+		sdkmetric.WithReader(exporter, views...),
 	)
 
 	return nil
