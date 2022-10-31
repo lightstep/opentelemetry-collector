@@ -67,6 +67,10 @@ type ScraperSettings struct {
 
 // NewScraper creates a new Scraper.
 func NewScraper(cfg ScraperSettings) *Scraper {
+	return newScraper(cfg, featuregate.GetRegistry())
+}
+
+func newScraper(cfg ScraperSettings, registry *featuregate.Registry) *Scraper {
 	scraper := &Scraper{
 		level:      cfg.ReceiverCreateSettings.TelemetrySettings.MetricsLevel,
 		receiverID: cfg.ReceiverID,
@@ -77,7 +81,7 @@ func NewScraper(cfg ScraperSettings) *Scraper {
 		tracer: cfg.ReceiverCreateSettings.TracerProvider.Tracer(cfg.Scraper.String()),
 
 		logger:            cfg.ReceiverCreateSettings.Logger,
-		useOtelForMetrics: featuregate.GetRegistry().IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
+		useOtelForMetrics: registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
 		otelAttrs: []attribute.KeyValue{
 			attribute.String(obsmetrics.ReceiverKey, cfg.ReceiverID.String()),
 			attribute.String(obsmetrics.ScraperKey, cfg.Scraper.String()),
