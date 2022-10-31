@@ -21,7 +21,6 @@ import (
 	"go.opencensus.io/stats"
 	"go.opencensus.io/tag"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/metric/instrument/syncint64"
 	"go.opentelemetry.io/otel/metric/unit"
@@ -88,12 +87,12 @@ func newScraper(cfg ScraperSettings, registry *featuregate.Registry) *Scraper {
 		},
 	}
 
-	meter := cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope)
-	scraper.createOtelMetrics(meter)
+	scraper.createOtelMetrics(cfg)
 	return scraper
 }
 
-func (s *Scraper) createOtelMetrics(meter metric.Meter) {
+func (s *Scraper) createOtelMetrics(cfg ScraperSettings) {
+	meter := cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope)
 	if !s.useOtelForMetrics {
 		return
 	}
