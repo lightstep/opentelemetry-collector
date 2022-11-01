@@ -253,14 +253,6 @@ func checkValueForView(wantTags []tag.Tag, value int64, vName string) error {
 	return fmt.Errorf("[%s]: could not find tags, wantTags: %s in rows %v", vName, wantTags, rows)
 }
 
-// tagsForScraperView returns the tags that are needed for the scraper views.
-func tagsForScraperView(receiver config.ComponentID, scraper config.ComponentID) []tag.Tag {
-	return []tag.Tag{
-		{Key: receiverTag, Value: receiver.String()},
-		{Key: scraperTag, Value: scraper.String()},
-	}
-}
-
 // tagsForProcessorView returns the tags that are needed for the processor views.
 func tagsForProcessorView(processor config.ComponentID) []tag.Tag {
 	return []tag.Tag{

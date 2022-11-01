@@ -92,10 +92,10 @@ func newScraper(cfg ScraperSettings, registry *featuregate.Registry) *Scraper {
 }
 
 func (s *Scraper) createOtelMetrics(cfg ScraperSettings) {
-	meter := cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope)
 	if !s.useOtelForMetrics {
 		return
 	}
+	meter := cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope)
 
 	var err error
 	handleError := func(metricName string, err error) {
@@ -117,7 +117,6 @@ func (s *Scraper) createOtelMetrics(cfg ScraperSettings) {
 		instrument.WithUnit(unit.Dimensionless),
 	)
 	handleError(obsmetrics.ScraperPrefix+obsmetrics.ErroredMetricPointsKey, err)
-
 }
 
 // StartMetricsOp is called when a scrape operation is started. The
@@ -152,15 +151,7 @@ func (s *Scraper) EndMetricsOp(
 	span := trace.SpanFromContext(scraperCtx)
 
 	if s.level != configtelemetry.LevelNone {
-		if s.useOtelForMetrics {
-			s.scrapedMetricsPoints.Add(scraperCtx, int64(numScrapedMetrics), s.otelAttrs...)
-			s.erroredMetricsPoints.Add(scraperCtx, int64(numErroredMetrics), s.otelAttrs...)
-		} else { // OC for metrics
-			stats.Record(
-				scraperCtx,
-				obsmetrics.ScraperScrapedMetricPoints.M(int64(numScrapedMetrics)),
-				obsmetrics.ScraperErroredMetricPoints.M(int64(numErroredMetrics)))
-		}
+		s.recordMetrics(scraperCtx, numScrapedMetrics, numErroredMetrics)
 	}
 
 	// end span according to errors
@@ -174,4 +165,16 @@ func (s *Scraper) EndMetricsOp(
 	}
 
 	span.End()
+}
+
+func (s *Scraper) recordMetrics(scraperCtx context.Context, numScrapedMetrics, numErroredMetrics int) {
+	if s.useOtelForMetrics {
+		s.scrapedMetricsPoints.Add(scraperCtx, int64(numScrapedMetrics), s.otelAttrs...)
+		s.erroredMetricsPoints.Add(scraperCtx, int64(numErroredMetrics), s.otelAttrs...)
+	} else { // OC for metrics
+		stats.Record(
+			scraperCtx,
+			obsmetrics.ScraperScrapedMetricPoints.M(int64(numScrapedMetrics)),
+			obsmetrics.ScraperErroredMetricPoints.M(int64(numErroredMetrics)))
+	}
 }

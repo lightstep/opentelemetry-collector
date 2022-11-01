@@ -224,11 +224,11 @@ func TestScrapeMetricsDataOp(t *testing.T) {
 			{items: 15, err: nil},
 		}
 		for i := range params {
-			scrp := NewScraper(ScraperSettings{
+			scrp := newScraper(ScraperSettings{
 				ReceiverID:             receiver,
 				Scraper:                scraper,
 				ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
-			})
+			}, registry)
 			ctx := scrp.StartMetricsOp(parentCtx)
 			assert.NotNil(t, ctx)
 			scrp.EndMetricsOp(ctx, params[i].items, params[i].err)
