@@ -139,11 +139,11 @@ func (proc *Processor) createOtelMetrics(cfg ProcessorSettings) {
 	handleError(obsmetrics.ProcessorPrefix+obsmetrics.DroppedSpansKey, err)
 
 	proc.acceptedMetricPointsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ReceiverPrefix+obsmetrics.AcceptedMetricPointsKey,
+		obsmetrics.ProcessorPrefix+obsmetrics.AcceptedMetricPointsKey,
 		instrument.WithDescription("Number of metric points successfully pushed into the next component in the pipeline."),
 		instrument.WithUnit(unit.Dimensionless),
 	)
-	handleError(obsmetrics.ReceiverPrefix+obsmetrics.AcceptedMetricPointsKey, err)
+	handleError(obsmetrics.ProcessorPrefix+obsmetrics.AcceptedMetricPointsKey, err)
 
 	proc.refusedMetricPointsCounter, err = meter.SyncInt64().Counter(
 		obsmetrics.ProcessorPrefix+obsmetrics.RefusedMetricPointsKey,
@@ -180,40 +180,6 @@ func (proc *Processor) createOtelMetrics(cfg ProcessorSettings) {
 	)
 	handleError(obsmetrics.ProcessorPrefix+obsmetrics.DroppedLogRecordsKey, err)
 }
-
-// func (por *Processor) recordMetrics(ctx context.Context, dataType config.DataType, accepted, refused, dropped int64) {
-// 	if por.useOtelForMetrics {
-// 		por.recordWithOtel(ctx, dataType, accepted, refused, dropped)
-// 	} else {
-// 		por.recordWithOC(ctx, dataType, accepted, refused, dropped)
-// 	}
-// }
-
-// func (por *Processor) recordWithOtel(ctx context.Context, dataType config.DataType, accepted, refused, dropped int64) {
-// 	var acceptedCounter, refusedCounter, droppedCounter syncint64.Counter
-	
-// 	switch dataType {
-// 	case config.TracesDataType:
-// 		acceptedCounter = por.acceptedSpansCounter
-// 		refusedCounter = por.refusedSpansCounter
-// 		droppedCounter = por.droppedSpansCounter
-// 	case config.MetricsDataType:
-// 		acceptedCounter = por.acceptedMetricPointsCounter
-// 		refusedCounter = por.refusedMetricPointsCounter
-// 		droppedCounter = por.droppedMetricPointsCounter
-// 	case config.LogsDataType:
-// 		acceptedCounter = por.acceptedLogRecordsCounter
-// 		refusedCounter = por.refusedLogRecordsCounter
-// 		droppedCounter = por.droppedLogRecordsCounter
-// 	}
-
-// 	acceptedCounter.Add(ctx, int64(accepted), por.otelAttrs...)
-// 	refusedCounter.Add(ctx, int64(refused), por.otelAttrs...)
-// 	droppedCounter.Add(ctx, int64(dropped), por.otelAttrs...)
-// }
-
-// func (por *Processor) recordWithOC(ctx context.Context, dataType, config.DataType)
-
 
 // TracesAccepted reports that the trace data was accepted.
 func (por *Processor) TracesAccepted(ctx context.Context, numSpans int) {
@@ -283,7 +249,7 @@ func (por *Processor) MetricsAccepted(ctx context.Context, numPoints int) {
 	}
 
 	if por.useOtelForMetrics {
-		por.acceptedMetricPointsCounter.Add(ctx, int64(numPoints), )
+		por.acceptedMetricPointsCounter.Add(ctx, int64(numPoints), por.otelAttrs...)
 	} else {
 		// ignore the error for now; should not happen
 		_ = stats.RecordWithTags(
