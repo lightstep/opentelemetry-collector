@@ -11,7 +11,7 @@ require (
 	go.opentelemetry.io/collector/exporter/otlpexporter v0.63.1
 	go.opentelemetry.io/collector/exporter/otlphttpexporter v0.63.1
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.63.1
-	golang.org/x/sys v0.1.0
+	golang.org/x/sys v0.2.0
 )
 
 require (
