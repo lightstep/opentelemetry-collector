@@ -479,14 +479,15 @@ func TestReceiveWithLongLivedCtx(t *testing.T) {
 }
 
 func TestProcessorTraceData(t *testing.T) {
-	testTelemetry(t, func(tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	testTelemetry(t, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 		const acceptedSpans = 27
 		const refusedSpans = 19
 		const droppedSpans = 13
-		obsrep := newProcessor(ProcessorSettings{
+		obsrep, err := newProcessor(ProcessorSettings{
 			ProcessorID:             processor,
 			ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 		}, registry)
+		require.NoError(t, err)
 		obsrep.TracesAccepted(context.Background(), acceptedSpans)
 		obsrep.TracesRefused(context.Background(), refusedSpans)
 		obsrep.TracesDropped(context.Background(), droppedSpans)
@@ -496,15 +497,16 @@ func TestProcessorTraceData(t *testing.T) {
 }
 
 func TestProcessorMetricsData(t *testing.T) {
-	testTelemetry(t, func(tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	testTelemetry(t, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 		const acceptedPoints = 29
 		const refusedPoints = 11
 		const droppedPoints = 17
 
-		obsrep := newProcessor(ProcessorSettings{
+		obsrep, err := newProcessor(ProcessorSettings{
 			ProcessorID:             processor,
 			ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 		}, registry)
+		require.NoError(t, err)
 		obsrep.MetricsAccepted(context.Background(), acceptedPoints)
 		obsrep.MetricsRefused(context.Background(), refusedPoints)
 		obsrep.MetricsDropped(context.Background(), droppedPoints)
@@ -536,15 +538,16 @@ func TestBuildProcessorCustomMetricName(t *testing.T) {
 }
 
 func TestProcessorLogRecords(t *testing.T) {
-	testTelemetry(t, func(tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	testTelemetry(t, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 		const acceptedRecords = 29
 		const refusedRecords = 11
 		const droppedRecords = 17
 
-		obsrep := newProcessor(ProcessorSettings{
+		obsrep, err := newProcessor(ProcessorSettings{
 			ProcessorID:             processor,
 			ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 		}, registry)
+		require.NoError(t, err)
 		obsrep.LogsAccepted(context.Background(), acceptedRecords)
 		obsrep.LogsRefused(context.Background(), refusedRecords)
 		obsrep.LogsDropped(context.Background(), droppedRecords)
