@@ -479,25 +479,30 @@ func TestReceiveWithLongLivedCtx(t *testing.T) {
 }
 
 func TestProcessorTraceData(t *testing.T) {
-	testTelemetry(t, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
-		const acceptedSpans = 27
-		const refusedSpans = 19
-		const droppedSpans = 13
-		obsrep, err := newProcessor(ProcessorSettings{
-			ProcessorID:             processor,
-			ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
-		}, registry)
-		require.NoError(t, err)
-		obsrep.TracesAccepted(context.Background(), acceptedSpans)
-		obsrep.TracesRefused(context.Background(), refusedSpans)
-		obsrep.TracesDropped(context.Background(), droppedSpans)
+	testTelemetry(t, testProcessorTraceData)
+}
 
-		require.NoError(t, obsreporttest.CheckProcessorTraces(tt, processor, acceptedSpans, refusedSpans, droppedSpans))
-	})
+func testProcessorTraceData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	const acceptedSpans = 27
+	const refusedSpans = 19
+	const droppedSpans = 13
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+	}, registry)
+	require.NoError(t, err)
+	obsrep.TracesAccepted(context.Background(), acceptedSpans)
+	obsrep.TracesRefused(context.Background(), refusedSpans)
+	obsrep.TracesDropped(context.Background(), droppedSpans)
+
+	require.NoError(t, obsreporttest.CheckProcessorTraces(tt, processor, acceptedSpans, refusedSpans, droppedSpans))
 }
 
 func TestProcessorMetricsData(t *testing.T) {
-	testTelemetry(t, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	testTelemetry(t, testProcessorMetricsData)
+}
+
+func testProcessorMetricsData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 		const acceptedPoints = 29
 		const refusedPoints = 11
 		const droppedPoints = 17
@@ -512,7 +517,6 @@ func TestProcessorMetricsData(t *testing.T) {
 		obsrep.MetricsDropped(context.Background(), droppedPoints)
 
 		require.NoError(t, obsreporttest.CheckProcessorMetrics(tt, processor, acceptedPoints, refusedPoints, droppedPoints))
-	})
 }
 
 func TestBuildProcessorCustomMetricName(t *testing.T) {
@@ -538,20 +542,22 @@ func TestBuildProcessorCustomMetricName(t *testing.T) {
 }
 
 func TestProcessorLogRecords(t *testing.T) {
-	testTelemetry(t, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
-		const acceptedRecords = 29
-		const refusedRecords = 11
-		const droppedRecords = 17
+	testTelemetry(t, testProcessorLogRecords)
+}
 
-		obsrep, err := newProcessor(ProcessorSettings{
-			ProcessorID:             processor,
-			ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
-		}, registry)
-		require.NoError(t, err)
-		obsrep.LogsAccepted(context.Background(), acceptedRecords)
-		obsrep.LogsRefused(context.Background(), refusedRecords)
-		obsrep.LogsDropped(context.Background(), droppedRecords)
+func testProcessorLogRecords(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	const acceptedRecords = 29
+	const refusedRecords = 11
+	const droppedRecords = 17
 
-		require.NoError(t, obsreporttest.CheckProcessorLogs(tt, processor, acceptedRecords, refusedRecords, droppedRecords))
-	})
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+	}, registry)
+	require.NoError(t, err)
+	obsrep.LogsAccepted(context.Background(), acceptedRecords)
+	obsrep.LogsRefused(context.Background(), refusedRecords)
+	obsrep.LogsDropped(context.Background(), droppedRecords)
+
+	require.NoError(t, obsreporttest.CheckProcessorLogs(tt, processor, acceptedRecords, refusedRecords, droppedRecords))
 }
