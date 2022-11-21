@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/service/telemetry"
 )
@@ -31,16 +32,16 @@ var (
 // Config defines the configuration for the various elements of collector or agent.
 type Config struct {
 	// Receivers is a map of ComponentID to Receivers.
-	Receivers map[config.ComponentID]config.Receiver
+	Receivers map[component.ID]component.ReceiverConfig
 
 	// Exporters is a map of ComponentID to Exporters.
-	Exporters map[config.ComponentID]config.Exporter
+	Exporters map[component.ID]component.ExporterConfig
 
 	// Processors is a map of ComponentID to Processors.
-	Processors map[config.ComponentID]config.Processor
+	Processors map[component.ID]component.ProcessorConfig
 
 	// Extensions is a map of ComponentID to extensions.
-	Extensions map[config.ComponentID]config.Extension
+	Extensions map[component.ID]component.ExtensionConfig
 
 	Service ConfigService
 }
@@ -59,7 +60,7 @@ func (cfg *Config) Validate() error {
 
 	// Validate the receiver configuration.
 	for recvID, recvCfg := range cfg.Receivers {
-		if err := recvCfg.Validate(); err != nil {
+		if err := component.ValidateConfig(recvCfg); err != nil {
 			return fmt.Errorf("receiver %q has invalid configuration: %w", recvID, err)
 		}
 	}
@@ -72,21 +73,21 @@ func (cfg *Config) Validate() error {
 
 	// Validate the exporter configuration.
 	for expID, expCfg := range cfg.Exporters {
-		if err := expCfg.Validate(); err != nil {
+		if err := component.ValidateConfig(expCfg); err != nil {
 			return fmt.Errorf("exporter %q has invalid configuration: %w", expID, err)
 		}
 	}
 
 	// Validate the processor configuration.
 	for procID, procCfg := range cfg.Processors {
-		if err := procCfg.Validate(); err != nil {
+		if err := component.ValidateConfig(procCfg); err != nil {
 			return fmt.Errorf("processor %q has invalid configuration: %w", procID, err)
 		}
 	}
 
 	// Validate the extension configuration.
 	for extID, extCfg := range cfg.Extensions {
-		if err := extCfg.Validate(); err != nil {
+		if err := component.ValidateConfig(extCfg); err != nil {
 			return fmt.Errorf("extension %q has invalid configuration: %w", extID, err)
 		}
 	}
@@ -111,7 +112,7 @@ func (cfg *Config) validateService() error {
 	// Check that all pipelines have at least one receiver and one exporter, and they reference
 	// only configured components.
 	for pipelineID, pipeline := range cfg.Service.Pipelines {
-		if pipelineID.Type() != config.TracesDataType && pipelineID.Type() != config.MetricsDataType && pipelineID.Type() != config.LogsDataType {
+		if pipelineID.Type() != component.DataTypeTraces && pipelineID.Type() != component.DataTypeMetrics && pipelineID.Type() != component.DataTypeLogs {
 			return fmt.Errorf("unknown pipeline datatype %q for %v", pipelineID.Type(), pipelineID)
 		}
 
@@ -129,11 +130,18 @@ func (cfg *Config) validateService() error {
 		}
 
 		// Validate pipeline processor name references.
+		procSet := make(map[component.ID]bool, len(cfg.Processors))
 		for _, ref := range pipeline.Processors {
 			// Check that the name referenced in the pipeline's processors exists in the top-level processors.
 			if cfg.Processors[ref] == nil {
 				return fmt.Errorf("pipeline %q references processor %q which does not exist", pipelineID, ref)
 			}
+			// Ensure no processors are duplicated within the pipeline
+			if _, exists := procSet[ref]; exists {
+
+				return fmt.Errorf("pipeline %q references processor %q multiple times", pipelineID, ref)
+			}
+			procSet[ref] = true
 		}
 
 		// Validate pipeline has at least one exporter.
@@ -148,6 +156,10 @@ func (cfg *Config) validateService() error {
 				return fmt.Errorf("pipeline %q references exporter %q which does not exist", pipelineID, ref)
 			}
 		}
+
+		if err := cfg.Service.Telemetry.Validate(); err != nil {
+			fmt.Printf("telemetry config validation failed, %v\n", err)
+		}
 	}
 	return nil
 }
@@ -158,10 +170,10 @@ type ConfigService struct {
 	Telemetry telemetry.Config `mapstructure:"telemetry"`
 
 	// Extensions are the ordered list of extensions configured for the service.
-	Extensions []config.ComponentID `mapstructure:"extensions"`
+	Extensions []component.ID `mapstructure:"extensions"`
 
 	// Pipelines are the set of data pipelines configured for the service.
-	Pipelines map[config.ComponentID]*ConfigServicePipeline `mapstructure:"pipelines"`
+	Pipelines map[component.ID]*ConfigServicePipeline `mapstructure:"pipelines"`
 }
 
 type ConfigServicePipeline = config.Pipeline

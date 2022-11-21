@@ -25,10 +25,10 @@ import (
 	"go.opentelemetry.io/otel/metric/instrument/syncint64"
 	"go.opentelemetry.io/otel/metric/unit"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/internal/obsreportconfig"
@@ -44,8 +44,8 @@ var (
 // Scraper is a helper to add observability to a component.Scraper.
 type Scraper struct {
 	level      configtelemetry.Level
-	receiverID config.ComponentID
-	scraper    config.ComponentID
+	receiverID component.ID
+	scraper    component.ID
 	mutators   []tag.Mutator
 	tracer     trace.Tracer
 
@@ -59,17 +59,27 @@ type Scraper struct {
 
 // ScraperSettings are settings for creating a Scraper.
 type ScraperSettings struct {
-	ReceiverID             config.ComponentID
-	Scraper                config.ComponentID
+	ReceiverID             component.ID
+	Scraper                component.ID
 	ReceiverCreateSettings component.ReceiverCreateSettings
 }
 
 // NewScraper creates a new Scraper.
-func NewScraper(cfg ScraperSettings) *Scraper {
+func NewScraper(cfg ScraperSettings) (*Scraper, error) {
 	return newScraper(cfg, featuregate.GetRegistry())
 }
 
-func newScraper(cfg ScraperSettings, registry *featuregate.Registry) *Scraper {
+// Deprecated: [v0.65.0] use NewScraper.
+func MustNewScraper(cfg ScraperSettings) *Scraper {
+	scr, err := newScraper(cfg, featuregate.GetRegistry())
+	if err != nil {
+		panic(err)
+	}
+
+	return scr
+}
+
+func newScraper(cfg ScraperSettings, registry *featuregate.Registry) (*Scraper, error) {
 	scraper := &Scraper{
 		level:      cfg.ReceiverCreateSettings.TelemetrySettings.MetricsLevel,
 		receiverID: cfg.ReceiverID,
@@ -87,36 +97,36 @@ func newScraper(cfg ScraperSettings, registry *featuregate.Registry) *Scraper {
 		},
 	}
 
-	scraper.createOtelMetrics(cfg)
-	return scraper
+	if err := scraper.createOtelMetrics(cfg); err != nil {
+		return nil, err
+	}
+
+	return scraper, nil
 }
 
-func (s *Scraper) createOtelMetrics(cfg ScraperSettings) {
+func (s *Scraper) createOtelMetrics(cfg ScraperSettings) error {
 	if !s.useOtelForMetrics {
-		return
+		return nil
 	}
 	meter := cfg.ReceiverCreateSettings.MeterProvider.Meter(scraperScope)
 
-	var err error
-	handleError := func(metricName string, err error) {
-		if err != nil {
-			s.logger.Warn("failed to create otel instrument", zap.Error(err), zap.String("metric", metricName))
-		}
-	}
+	var errors, err error
 
 	s.scrapedMetricsPoints, err = meter.SyncInt64().Counter(
 		obsmetrics.ScraperPrefix+obsmetrics.ScrapedMetricPointsKey,
 		instrument.WithDescription("Number of metric points successfully scraped."),
 		instrument.WithUnit(unit.Dimensionless),
 	)
-	handleError(obsmetrics.ScraperPrefix+obsmetrics.ScrapedMetricPointsKey, err)
+	errors = multierr.Append(errors, err)
 
 	s.erroredMetricsPoints, err = meter.SyncInt64().Counter(
 		obsmetrics.ScraperPrefix+obsmetrics.ErroredMetricPointsKey,
 		instrument.WithDescription("Number of metric points that were unable to be scraped."),
 		instrument.WithUnit(unit.Dimensionless),
 	)
-	handleError(obsmetrics.ScraperPrefix+obsmetrics.ErroredMetricPointsKey, err)
+	errors = multierr.Append(errors, err)
+
+	return errors
 }
 
 // StartMetricsOp is called when a scrape operation is started. The
@@ -157,7 +167,7 @@ func (s *Scraper) EndMetricsOp(
 	// end span according to errors
 	if span.IsRecording() {
 		span.SetAttributes(
-			attribute.String(obsmetrics.FormatKey, string(config.MetricsDataType)),
+			attribute.String(obsmetrics.FormatKey, string(component.DataTypeMetrics)),
 			attribute.Int64(obsmetrics.ScrapedMetricPointsKey, int64(numScrapedMetrics)),
 			attribute.Int64(obsmetrics.ErroredMetricPointsKey, int64(numErroredMetrics)),
 		)

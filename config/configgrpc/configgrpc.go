@@ -42,6 +42,7 @@ import (
 	"go.opentelemetry.io/collector/config/configcompression"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
+	"go.opentelemetry.io/collector/config/internal"
 )
 
 var errMetadataNotFound = errors.New("no request metadata found")
@@ -191,11 +192,6 @@ func (gcs *GRPCClientSettings) ToClientConn(ctx context.Context, host component.
 	return grpc.DialContext(ctx, gcs.SanitizedEndpoint(), opts...)
 }
 
-// Deprecated: [v0.64.0] use ToClientConn.
-func (gcs *GRPCClientSettings) ToDialOptions(host component.Host, settings component.TelemetrySettings) ([]grpc.DialOption, error) {
-	return gcs.toDialOptions(host, settings)
-}
-
 func (gcs *GRPCClientSettings) toDialOptions(host component.Host, settings component.TelemetrySettings) ([]grpc.DialOption, error) {
 	var opts []grpc.DialOption
 	if configcompression.IsCompressed(gcs.Compression) {
@@ -297,12 +293,12 @@ func (gss *GRPCServerSettings) ToServer(host component.Host, settings component.
 	return grpc.NewServer(opts...), nil
 }
 
-// Deprecated: [v0.64.0] use ToServer.
-func (gss *GRPCServerSettings) ToServerOption(host component.Host, settings component.TelemetrySettings) ([]grpc.ServerOption, error) {
-	return gss.toServerOption(host, settings)
-}
-
 func (gss *GRPCServerSettings) toServerOption(host component.Host, settings component.TelemetrySettings) ([]grpc.ServerOption, error) {
+	switch gss.NetAddr.Transport {
+	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
+		internal.WarnOnUnspecifiedHost(settings.Logger, gss.NetAddr.Endpoint)
+	}
+
 	var opts []grpc.ServerOption
 
 	if gss.TLSSetting != nil {

@@ -14,13 +14,17 @@
 
 package config // import "go.opentelemetry.io/collector/config"
 
+import (
+	"go.opentelemetry.io/collector/component"
+)
+
 // Pipeline defines a single pipeline.
 // Deprecated: [v0.52.0] Use service.ConfigServicePipeline
 type Pipeline struct {
-	Receivers  []ComponentID `mapstructure:"receivers"`
-	Processors []ComponentID `mapstructure:"processors"`
-	Exporters  []ComponentID `mapstructure:"exporters"`
+	Receivers  []component.ID `mapstructure:"receivers"`
+	Processors []component.ID `mapstructure:"processors"`
+	Exporters  []component.ID `mapstructure:"exporters"`
 }
 
 // Deprecated: [v0.52.0] will be removed soon.
-type Pipelines = map[ComponentID]*Pipeline
+type Pipelines = map[component.ID]*Pipeline
