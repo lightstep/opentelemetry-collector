@@ -62,7 +62,7 @@ func (pc *prometheusChecker) checkReceiverMetrics(receiver component.ID, protoco
 		pc.checkCounter("receiver_refused_metric_points", droppedMetricPoints, receiverAttrs))
 }
 
-func (pc *prometheusChecker) checkProcessorTraces(processor config.ComponentID, acceptedSpans, refusedSpans, droppedSpans int64) error {
+func (pc *prometheusChecker) checkProcessorTraces(processor component.ID, acceptedSpans, refusedSpans, droppedSpans int64) error {
 	processorAttrs := attributesForProcessorMetrics(processor)
 	return multierr.Combine(
 		pc.checkCounter("processor_accepted_spans", acceptedSpans, processorAttrs),
@@ -70,7 +70,7 @@ func (pc *prometheusChecker) checkProcessorTraces(processor config.ComponentID, 
 		pc.checkCounter("processor_dropped_spans", droppedSpans, processorAttrs))
 }
 
-func (pc *prometheusChecker) checkProcessorMetrics(processor config.ComponentID, acceptedMetricPoints, refusedMetricPoints, droppedMetricPoints int64) error {
+func (pc *prometheusChecker) checkProcessorMetrics(processor component.ID, acceptedMetricPoints, refusedMetricPoints, droppedMetricPoints int64) error {
 	processorAttrs := attributesForProcessorMetrics(processor)
 	return multierr.Combine(
 		pc.checkCounter("processor_accepted_metric_points", acceptedMetricPoints, processorAttrs),
@@ -78,7 +78,7 @@ func (pc *prometheusChecker) checkProcessorMetrics(processor config.ComponentID,
 		pc.checkCounter("processor_dropped_metric_points", droppedMetricPoints, processorAttrs))
 }
 
-func (pc *prometheusChecker) checkProcessorLogs(processor config.ComponentID, acceptedLogRecords, refusedLogRecords, droppedLogRecords int64) error {
+func (pc *prometheusChecker) checkProcessorLogs(processor component.ID, acceptedLogRecords, refusedLogRecords, droppedLogRecords int64) error {
 	processorAttrs := attributesForProcessorMetrics(processor)
 	return multierr.Combine(
 		pc.checkCounter("processor_accepted_log_records", acceptedLogRecords, processorAttrs),
@@ -86,7 +86,7 @@ func (pc *prometheusChecker) checkProcessorLogs(processor config.ComponentID, ac
 		pc.checkCounter("processor_dropped_log_records", droppedLogRecords, processorAttrs))
 }
 
-func (pc *prometheusChecker) checkExporterTraces(exporter config.ComponentID, sentSpans, sendFailedSpans int64) error {
+func (pc *prometheusChecker) checkExporterTraces(exporter component.ID, sentSpans, sendFailedSpans int64) error {
 	exporterAttrs := attributesForExporterMetrics(exporter)
 	return multierr.Combine(
 		pc.checkCounter("exporter_sent_spans", sentSpans, exporterAttrs),
@@ -191,7 +191,7 @@ func attributesForReceiverMetrics(receiver component.ID, transport string) []att
 	}
 }
 
-func attributesForProcessorMetrics(processor config.ComponentID) []attribute.KeyValue {
+func attributesForProcessorMetrics(processor component.ID) []attribute.KeyValue {
 	return []attribute.KeyValue{
 		attribute.String(processorTag.Name(), processor.String()),
 	}

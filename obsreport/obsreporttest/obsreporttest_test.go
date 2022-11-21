@@ -33,9 +33,9 @@ const (
 
 var (
 	scraper  = component.NewID("fakeScraper")
-	receiver = config.NewComponentID("fakeReicever")
-	processor = config.NewComponentID("fakeProcessor")
-	exporter = config.NewComponentID("fakeExporter")
+	receiver = component.NewID("fakeReicever")
+	processor= component.NewID("fakeProcessor")
+	exporter = component.NewID("fakeExporter")
 )
 
 func TestCheckScraperMetricsViews(t *testing.T) {
@@ -127,10 +127,11 @@ func TestCheckProcessorTracesViews(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
-	por := obsreport.NewProcessor(obsreport.ProcessorSettings{
+	por, err := obsreport.NewProcessor(obsreport.ProcessorSettings{
 		ProcessorID:             processor,
 		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 	})
+	assert.NoError(t, err)
 
 	por.TracesAccepted(context.Background(), 7)
 	por.TracesRefused(context.Background(), 8)
@@ -151,10 +152,11 @@ func TestCheckProcessorMetricsViews(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
-	por := obsreport.NewProcessor(obsreport.ProcessorSettings{
+	por, err := obsreport.NewProcessor(obsreport.ProcessorSettings{
 		ProcessorID:             processor,
 		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 	})
+	assert.NoError(t, err)
 
 	por.MetricsAccepted(context.Background(), 7)
 	por.MetricsRefused(context.Background(), 8)
@@ -175,10 +177,11 @@ func TestCheckProcessorLogViews(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
-	por := obsreport.NewProcessor(obsreport.ProcessorSettings{
+	por, err := obsreport.NewProcessor(obsreport.ProcessorSettings{
 		ProcessorID:             processor,
 		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 	})
+	assert.NoError(t, err)
 
 	por.LogsAccepted(context.Background(), 7)
 	por.LogsRefused(context.Background(), 8)
