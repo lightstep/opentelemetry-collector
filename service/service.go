@@ -30,6 +30,7 @@ import (
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/internal/obsreportconfig"
 	"go.opentelemetry.io/collector/service/extensions"
 	"go.opentelemetry.io/collector/service/internal/proctelemetry"
 	"go.opentelemetry.io/collector/service/telemetry"
@@ -213,8 +214,14 @@ func (srv *Service) initExtensionsAndPipeline(ctx context.Context, set Settings,
 
 	if cfg.Telemetry.Metrics.Level != configtelemetry.LevelNone && cfg.Telemetry.Metrics.Address != "" {
 		// The process telemetry initialization requires the ballast size, which is available after the extensions are initialized.
-		if err = proctelemetry.RegisterProcessMetrics(srv.telemetryInitializer.ocRegistry, getBallastSize(srv.host)); err != nil {
-			return fmt.Errorf("failed to register process metrics: %w", err)
+		if srv.telemetryInitializer.registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID) {
+			if err = proctelemetry.OtelRegisterProcessMetrics(context.Background(), srv.telemetrySettings, getBallastSize(srv.host)); err != nil {
+				return fmt.Errorf("failed to register process metrics: %w", err)
+			}
+		} else { // use OC metrics
+			if err = proctelemetry.RegisterProcessMetrics(srv.telemetryInitializer.ocRegistry, getBallastSize(srv.host)); err != nil {
+				return fmt.Errorf("failed to register process metrics: %w", err)
+			}
 		}
 	}
 
