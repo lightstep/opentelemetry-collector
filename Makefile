@@ -484,6 +484,18 @@ chlog-preview: chlog-install
 chlog-update: chlog-install
 	chloggen update --version $(VERSION)
 
+## Custom Commands
+buildotelcorecol-m1-laptop-local:
+	docker build . -t otc-fork --build-arg ENV=m1-laptop-dev
+
+runotelcorecol-m1-laptop-local:
+	docker run otc-fork
+
+buildotelcorecol:
+	docker buildx --platform linux/amd64 . -t otc-fork --build-arg
+
+runotelcorecol:
+	docker run otc-fork
 
 ## Custom Commands
 buildotelcorecol-m1-laptop-local:
