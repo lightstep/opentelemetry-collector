@@ -479,15 +479,33 @@ func TestReceiveWithLongLivedCtx(t *testing.T) {
 }
 
 func TestProcessorTraceData(t *testing.T) {
+<<<<<<< HEAD
 	testTelemetry(t, processorID, testProcessorTraceData)
 }
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	tt, err := obsreporttest.SetupTelemetry()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+=======
+	testTelemetry(t, testProcessorTraceData)
+}
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 
 func testProcessorTraceData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 	const acceptedSpans = 27
 	const refusedSpans = 19
 	const droppedSpans = 13
+<<<<<<< HEAD
 	obsrep, err := newProcessor(ProcessorSettings{
 		ProcessorID:             processorID,
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+
+	obsrep, err := NewProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+=======
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 	}, registry)
 	require.NoError(t, err)
@@ -499,14 +517,35 @@ func testProcessorTraceData(t *testing.T, tt obsreporttest.TestTelemetry, regist
 }
 
 func TestProcessorMetricsData(t *testing.T) {
+<<<<<<< HEAD
 	testTelemetry(t, processorID, testProcessorMetricsData)
 }
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	tt, err := obsreporttest.SetupTelemetry()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+=======
+	testTelemetry(t, testProcessorMetricsData)
+}
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 
+<<<<<<< HEAD
 func testProcessorMetricsData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 	const acceptedPoints = 29
 	const refusedPoints = 11
 	const droppedPoints = 17
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	const acceptedPoints = 29
+	const refusedPoints = 11
+	const droppedPoints = 17
+=======
+func testProcessorMetricsData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		const acceptedPoints = 29
+		const refusedPoints = 11
+		const droppedPoints = 17
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 
+<<<<<<< HEAD
 	obsrep, err := newProcessor(ProcessorSettings{
 		ProcessorID:             processorID,
 		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
@@ -515,8 +554,33 @@ func testProcessorMetricsData(t *testing.T, tt obsreporttest.TestTelemetry, regi
 	obsrep.MetricsAccepted(context.Background(), acceptedPoints)
 	obsrep.MetricsRefused(context.Background(), refusedPoints)
 	obsrep.MetricsDropped(context.Background(), droppedPoints)
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	obsrep, err := NewProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+	})
+	require.NoError(t, err)
+	obsrep.MetricsAccepted(context.Background(), acceptedPoints)
+	obsrep.MetricsRefused(context.Background(), refusedPoints)
+	obsrep.MetricsDropped(context.Background(), droppedPoints)
+=======
+		obsrep, err := newProcessor(ProcessorSettings{
+			ProcessorID:             processor,
+			ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+		}, registry)
+		require.NoError(t, err)
+		obsrep.MetricsAccepted(context.Background(), acceptedPoints)
+		obsrep.MetricsRefused(context.Background(), refusedPoints)
+		obsrep.MetricsDropped(context.Background(), droppedPoints)
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 
+<<<<<<< HEAD
 	require.NoError(t, tt.CheckProcessorMetrics(acceptedPoints, refusedPoints, droppedPoints))
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	require.NoError(t, obsreporttest.CheckProcessorMetrics(tt, processor, acceptedPoints, refusedPoints, droppedPoints))
+=======
+		require.NoError(t, obsreporttest.CheckProcessorMetrics(tt, processor, acceptedPoints, refusedPoints, droppedPoints))
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 }
 
 func TestBuildProcessorCustomMetricName(t *testing.T) {
@@ -542,16 +606,33 @@ func TestBuildProcessorCustomMetricName(t *testing.T) {
 }
 
 func TestProcessorLogRecords(t *testing.T) {
+<<<<<<< HEAD
 	testTelemetry(t, processorID, testProcessorLogRecords)
 }
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	tt, err := obsreporttest.SetupTelemetry()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+=======
+	testTelemetry(t, testProcessorLogRecords)
+}
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 
 func testProcessorLogRecords(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
 	const acceptedRecords = 29
 	const refusedRecords = 11
 	const droppedRecords = 17
 
+<<<<<<< HEAD
 	obsrep, err := newProcessor(ProcessorSettings{
 		ProcessorID:             processorID,
+||||||| parent of 57b2ea42 (Instrument obsreport.Processor (#36))
+	obsrep, err := NewProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+=======
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processor,
+>>>>>>> 57b2ea42 (Instrument obsreport.Processor (#36))
 		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
 	}, registry)
 	require.NoError(t, err)

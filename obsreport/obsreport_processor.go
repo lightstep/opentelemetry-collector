@@ -12,288 +12,552 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package obsreport // import "go.opentelemetry.io/collector/obsreport"
+package obsreport
 
 import (
 	"context"
-	"strings"
+	"errors"
+	"testing"
 
-	"go.opencensus.io/stats"
-	"go.opencensus.io/tag"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/syncint64"
-	"go.opentelemetry.io/otel/metric/unit"
-	"go.uber.org/multierr"
-	"go.uber.org/zap"
+	"go.opentelemetry.io/otel/codes"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/internal/obsreportconfig"
 	"go.opentelemetry.io/collector/internal/obsreportconfig/obsmetrics"
-	"go.opentelemetry.io/collector/processor"
+	"go.opentelemetry.io/collector/obsreport/obsreporttest"
+	"go.opentelemetry.io/collector/receiver/scrapererror"
+)
+
+const (
+	transport = "fakeTransport"
+	format    = "fakeFormat"
 )
 
 var (
-	processorName  = "processor"
-	processorScope = scopeName + nameSep + processorName
+	receiverID  = component.NewID("fakeReceiver")
+	scraperID   = component.NewID("fakeScraper")
+	processorID = component.NewID("fakeProcessor")
+	exporterID  = component.NewID("fakeExporter")
+
+	errFake        = errors.New("errFake")
+	partialErrFake = scrapererror.NewPartialScrapeError(errFake, 1)
 )
 
-// BuildProcessorCustomMetricName is used to be build a metric name following
-// the standards used in the Collector. The configType should be the same
-// value used to identify the type on the config.
-func BuildProcessorCustomMetricName(configType, metric string) string {
-	componentPrefix := obsmetrics.ProcessorPrefix
-	if !strings.HasSuffix(componentPrefix, obsmetrics.NameSep) {
-		componentPrefix += obsmetrics.NameSep
+type testParams struct {
+	items int
+	err   error
+}
+
+func testTelemetry(t *testing.T, id component.ID, testFunc func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry)) {
+	t.Run("WithOC", func(t *testing.T) {
+		tt, err := obsreporttest.SetupTelemetry(id)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+		testFunc(t, tt, featuregate.NewRegistry())
+	})
+
+	t.Run("WithOTel", func(t *testing.T) {
+		registry := featuregate.NewRegistry()
+		obsreportconfig.RegisterInternalMetricFeatureGate(registry)
+		require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: true}))
+
+		tt, err := obsreporttest.SetupTelemetry(id)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+		testFunc(t, tt, registry)
+	})
+}
+
+func TestReceiveTraceDataOp(t *testing.T) {
+	testTelemetry(t, receiverID, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+		defer parentSpan.End()
+
+		params := []testParams{
+			{items: 13, err: errFake},
+			{items: 42, err: nil},
+		}
+		for i, param := range params {
+			rec, err := newReceiver(ReceiverSettings{
+				ReceiverID:             receiverID,
+				Transport:              transport,
+				ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+			}, registry)
+			require.NoError(t, err)
+			ctx := rec.StartTracesOp(parentCtx)
+			assert.NotNil(t, ctx)
+			rec.EndTracesOp(ctx, format, params[i].items, param.err)
+		}
+
+		spans := tt.SpanRecorder.Ended()
+		require.Equal(t, len(params), len(spans))
+
+		var acceptedSpans, refusedSpans int
+		for i, span := range spans {
+			assert.Equal(t, "receiver/"+receiverID.String()+"/TraceDataReceived", span.Name())
+			switch {
+			case params[i].err == nil:
+				acceptedSpans += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedSpansKey, Value: attribute.Int64Value(int64(params[i].items))})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedSpansKey, Value: attribute.Int64Value(0)})
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			case errors.Is(params[i].err, errFake):
+				refusedSpans += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedSpansKey, Value: attribute.Int64Value(0)})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedSpansKey, Value: attribute.Int64Value(int64(params[i].items))})
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, params[i].err.Error(), span.Status().Description)
+			default:
+				t.Fatalf("unexpected param: %v", params[i])
+			}
+		}
+		require.NoError(t, tt.CheckReceiverTraces(transport, int64(acceptedSpans), int64(refusedSpans)))
+	})
+}
+
+func TestReceiveLogsOp(t *testing.T) {
+	testTelemetry(t, receiverID, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+		defer parentSpan.End()
+
+		params := []testParams{
+			{items: 13, err: errFake},
+			{items: 42, err: nil},
+		}
+		for i, param := range params {
+			rec, err := newReceiver(ReceiverSettings{
+				ReceiverID:             receiverID,
+				Transport:              transport,
+				ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+			}, registry)
+			require.NoError(t, err)
+
+			ctx := rec.StartLogsOp(parentCtx)
+			assert.NotNil(t, ctx)
+			rec.EndLogsOp(ctx, format, params[i].items, param.err)
+		}
+
+		spans := tt.SpanRecorder.Ended()
+		require.Equal(t, len(params), len(spans))
+
+		var acceptedLogRecords, refusedLogRecords int
+		for i, span := range spans {
+			assert.Equal(t, "receiver/"+receiverID.String()+"/LogsReceived", span.Name())
+			switch {
+			case params[i].err == nil:
+				acceptedLogRecords += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedLogRecordsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedLogRecordsKey, Value: attribute.Int64Value(0)})
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			case errors.Is(params[i].err, errFake):
+				refusedLogRecords += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedLogRecordsKey, Value: attribute.Int64Value(0)})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedLogRecordsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, params[i].err.Error(), span.Status().Description)
+			default:
+				t.Fatalf("unexpected param: %v", params[i])
+			}
+		}
+		require.NoError(t, tt.CheckReceiverLogs(transport, int64(acceptedLogRecords), int64(refusedLogRecords)))
+	})
+}
+
+func TestReceiveMetricsOp(t *testing.T) {
+	testTelemetry(t, receiverID, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+		defer parentSpan.End()
+
+		params := []testParams{
+			{items: 23, err: errFake},
+			{items: 29, err: nil},
+		}
+		for i, param := range params {
+			rec, err := newReceiver(ReceiverSettings{
+				ReceiverID:             receiverID,
+				Transport:              transport,
+				ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+			}, registry)
+			require.NoError(t, err)
+
+			ctx := rec.StartMetricsOp(parentCtx)
+			assert.NotNil(t, ctx)
+			rec.EndMetricsOp(ctx, format, params[i].items, param.err)
+		}
+
+		spans := tt.SpanRecorder.Ended()
+		require.Equal(t, len(params), len(spans))
+
+		var acceptedMetricPoints, refusedMetricPoints int
+		for i, span := range spans {
+			assert.Equal(t, "receiver/"+receiverID.String()+"/MetricsReceived", span.Name())
+			switch {
+			case params[i].err == nil:
+				acceptedMetricPoints += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedMetricPointsKey, Value: attribute.Int64Value(0)})
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			case errors.Is(params[i].err, errFake):
+				refusedMetricPoints += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedMetricPointsKey, Value: attribute.Int64Value(0)})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, params[i].err.Error(), span.Status().Description)
+			default:
+				t.Fatalf("unexpected param: %v", params[i])
+			}
+		}
+
+		require.NoError(t, tt.CheckReceiverMetrics(transport, int64(acceptedMetricPoints), int64(refusedMetricPoints)))
+	})
+}
+
+func TestScrapeMetricsDataOp(t *testing.T) {
+	testTelemetry(t, receiverID, testScrapeMetricsDataOp)
+}
+
+func testScrapeMetricsDataOp(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+	defer parentSpan.End()
+
+	params := []testParams{
+		{items: 23, err: partialErrFake},
+		{items: 29, err: errFake},
+		{items: 15, err: nil},
 	}
-	if configType == "" {
-		return componentPrefix
+	for i := range params {
+		scrp, err := newScraper(ScraperSettings{
+			ReceiverID:             receiverID,
+			Scraper:                scraperID,
+			ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+		}, registry)
+		require.NoError(t, err)
+		ctx := scrp.StartMetricsOp(parentCtx)
+		assert.NotNil(t, ctx)
+		scrp.EndMetricsOp(ctx, params[i].items, params[i].err)
 	}
-	return componentPrefix + configType + obsmetrics.NameSep + metric
+
+	spans := tt.SpanRecorder.Ended()
+	require.Equal(t, len(params), len(spans))
+
+	var scrapedMetricPoints, erroredMetricPoints int
+	for i, span := range spans {
+		assert.Equal(t, "scraper/"+receiverID.String()+"/"+scraperID.String()+"/MetricsScraped", span.Name())
+		switch {
+		case params[i].err == nil:
+			scrapedMetricPoints += params[i].items
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.ScrapedMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.ErroredMetricPointsKey, Value: attribute.Int64Value(0)})
+			assert.Equal(t, codes.Unset, span.Status().Code)
+		case errors.Is(params[i].err, errFake):
+			erroredMetricPoints += params[i].items
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.ScrapedMetricPointsKey, Value: attribute.Int64Value(0)})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.ErroredMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Equal(t, params[i].err.Error(), span.Status().Description)
+
+		case errors.Is(params[i].err, partialErrFake):
+			scrapedMetricPoints += params[i].items
+			erroredMetricPoints++
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.ScrapedMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.ErroredMetricPointsKey, Value: attribute.Int64Value(1)})
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Equal(t, params[i].err.Error(), span.Status().Description)
+		default:
+			t.Fatalf("unexpected err param: %v", params[i].err)
+		}
+	}
+
+	require.NoError(t, obsreporttest.CheckScraperMetrics(tt, receiverID, scraperID, int64(scrapedMetricPoints), int64(erroredMetricPoints)))
 }
 
-// Processor is a helper to add observability to a component.Processor.
-type Processor struct {
-	level    configtelemetry.Level
-	mutators []tag.Mutator
+func TestExportTraceDataOp(t *testing.T) {
+	testTelemetry(t, exporterID, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+		defer parentSpan.End()
 
-	logger *zap.Logger
+		obsrep, err := newExporter(ExporterSettings{
+			ExporterID:             exporterID,
+			ExporterCreateSettings: tt.ToExporterCreateSettings(),
+		}, registry)
+		require.NoError(t, err)
 
-	useOtelForMetrics bool
-	otelAttrs         []attribute.KeyValue
+		params := []testParams{
+			{items: 22, err: nil},
+			{items: 14, err: errFake},
+		}
+		for i := range params {
+			ctx := obsrep.StartTracesOp(parentCtx)
+			assert.NotNil(t, ctx)
+			obsrep.EndTracesOp(ctx, params[i].items, params[i].err)
+		}
 
-	acceptedSpansCounter        syncint64.Counter
-	refusedSpansCounter         syncint64.Counter
-	droppedSpansCounter         syncint64.Counter
-	acceptedMetricPointsCounter syncint64.Counter
-	refusedMetricPointsCounter  syncint64.Counter
-	droppedMetricPointsCounter  syncint64.Counter
-	acceptedLogRecordsCounter   syncint64.Counter
-	refusedLogRecordsCounter    syncint64.Counter
-	droppedLogRecordsCounter    syncint64.Counter
+		spans := tt.SpanRecorder.Ended()
+		require.Equal(t, len(params), len(spans))
+
+		var sentSpans, failedToSendSpans int
+		for i, span := range spans {
+			assert.Equal(t, "exporter/"+exporterID.String()+"/traces", span.Name())
+			switch {
+			case params[i].err == nil:
+				sentSpans += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.SentSpansKey, Value: attribute.Int64Value(int64(params[i].items))})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.FailedToSendSpansKey, Value: attribute.Int64Value(0)})
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			case errors.Is(params[i].err, errFake):
+				failedToSendSpans += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.SentSpansKey, Value: attribute.Int64Value(0)})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.FailedToSendSpansKey, Value: attribute.Int64Value(int64(params[i].items))})
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, params[i].err.Error(), span.Status().Description)
+			default:
+				t.Fatalf("unexpected error: %v", params[i].err)
+			}
+		}
+
+		require.NoError(t, tt.CheckExporterTraces(int64(sentSpans), int64(failedToSendSpans)))
+
+	})
 }
 
-// ProcessorSettings are settings for creating a Processor.
-type ProcessorSettings struct {
-	ProcessorID             component.ID
-	ProcessorCreateSettings processor.CreateSettings
+func TestExportMetricsOp(t *testing.T) {
+	testTelemetry(t, exporterID, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+		defer parentSpan.End()
+
+		obsrep, err := newExporter(ExporterSettings{
+			ExporterID:             exporterID,
+			ExporterCreateSettings: tt.ToExporterCreateSettings(),
+		}, registry)
+		require.NoError(t, err)
+
+		params := []testParams{
+			{items: 17, err: nil},
+			{items: 23, err: errFake},
+		}
+		for i := range params {
+			ctx := obsrep.StartMetricsOp(parentCtx)
+			assert.NotNil(t, ctx)
+
+			obsrep.EndMetricsOp(ctx, params[i].items, params[i].err)
+		}
+
+		spans := tt.SpanRecorder.Ended()
+		require.Equal(t, len(params), len(spans))
+
+		var sentMetricPoints, failedToSendMetricPoints int
+		for i, span := range spans {
+			assert.Equal(t, "exporter/"+exporterID.String()+"/metrics", span.Name())
+			switch {
+			case params[i].err == nil:
+				sentMetricPoints += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.SentMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.FailedToSendMetricPointsKey, Value: attribute.Int64Value(0)})
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			case errors.Is(params[i].err, errFake):
+				failedToSendMetricPoints += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.SentMetricPointsKey, Value: attribute.Int64Value(0)})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.FailedToSendMetricPointsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, params[i].err.Error(), span.Status().Description)
+			default:
+				t.Fatalf("unexpected error: %v", params[i].err)
+			}
+		}
+
+		require.NoError(t, tt.CheckExporterMetrics(int64(sentMetricPoints), int64(failedToSendMetricPoints)))
+	})
 }
 
-// NewProcessor creates a new Processor.
-func NewProcessor(cfg ProcessorSettings) (*Processor, error) {
-	return newProcessor(cfg, featuregate.GetRegistry())
+func TestExportLogsOp(t *testing.T) {
+	testTelemetry(t, exporterID, func(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+		parentCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+		defer parentSpan.End()
+
+		obsrep, err := newExporter(ExporterSettings{
+			ExporterID:             exporterID,
+			ExporterCreateSettings: tt.ToExporterCreateSettings(),
+		}, registry)
+		require.NoError(t, err)
+
+		params := []testParams{
+			{items: 17, err: nil},
+			{items: 23, err: errFake},
+		}
+		for i := range params {
+			ctx := obsrep.StartLogsOp(parentCtx)
+			assert.NotNil(t, ctx)
+
+			obsrep.EndLogsOp(ctx, params[i].items, params[i].err)
+		}
+
+		spans := tt.SpanRecorder.Ended()
+		require.Equal(t, len(params), len(spans))
+
+		var sentLogRecords, failedToSendLogRecords int
+		for i, span := range spans {
+			assert.Equal(t, "exporter/"+exporterID.String()+"/logs", span.Name())
+			switch {
+			case params[i].err == nil:
+				sentLogRecords += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.SentLogRecordsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.FailedToSendLogRecordsKey, Value: attribute.Int64Value(0)})
+				assert.Equal(t, codes.Unset, span.Status().Code)
+			case errors.Is(params[i].err, errFake):
+				failedToSendLogRecords += params[i].items
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.SentLogRecordsKey, Value: attribute.Int64Value(0)})
+				require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.FailedToSendLogRecordsKey, Value: attribute.Int64Value(int64(params[i].items))})
+				assert.Equal(t, codes.Error, span.Status().Code)
+				assert.Equal(t, params[i].err.Error(), span.Status().Description)
+			default:
+				t.Fatalf("unexpected error: %v", params[i].err)
+			}
+		}
+
+		require.NoError(t, tt.CheckExporterLogs(int64(sentLogRecords), int64(failedToSendLogRecords)))
+	})
 }
 
-func newProcessor(cfg ProcessorSettings, registry *featuregate.Registry) (*Processor, error) {
-	proc := &Processor{
-		level:             cfg.ProcessorCreateSettings.MetricsLevel,
-		mutators:          []tag.Mutator{tag.Upsert(obsmetrics.TagKeyProcessor, cfg.ProcessorID.String(), tag.WithTTL(tag.TTLNoPropagation))},
-		logger:            cfg.ProcessorCreateSettings.Logger,
-		useOtelForMetrics: registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
-		otelAttrs: []attribute.KeyValue{
-			attribute.String(obsmetrics.ProcessorKey, cfg.ProcessorID.String()),
+func TestReceiveWithLongLivedCtx(t *testing.T) {
+	tt, err := obsreporttest.SetupTelemetry(receiverID)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
+
+	longLivedCtx, parentSpan := tt.TracerProvider.Tracer("test").Start(context.Background(), t.Name())
+	defer parentSpan.End()
+
+	params := []testParams{
+		{items: 17, err: nil},
+		{items: 23, err: errFake},
+	}
+	for i := range params {
+		// Use a new context on each operation to simulate distinct operations
+		// under the same long lived context.
+		rec, rerr := NewReceiver(ReceiverSettings{
+			ReceiverID:             receiverID,
+			Transport:              transport,
+			LongLivedCtx:           true,
+			ReceiverCreateSettings: tt.ToReceiverCreateSettings(),
+		})
+		require.NoError(t, rerr)
+		ctx := rec.StartTracesOp(longLivedCtx)
+		assert.NotNil(t, ctx)
+		rec.EndTracesOp(ctx, format, params[i].items, params[i].err)
+	}
+
+	spans := tt.SpanRecorder.Ended()
+	require.Equal(t, len(params), len(spans))
+
+	for i, span := range spans {
+		assert.False(t, span.Parent().IsValid())
+		require.Equal(t, 1, len(span.Links()))
+		link := span.Links()[0]
+		assert.Equal(t, parentSpan.SpanContext().TraceID(), link.SpanContext.TraceID())
+		assert.Equal(t, parentSpan.SpanContext().SpanID(), link.SpanContext.SpanID())
+		assert.Equal(t, "receiver/"+receiverID.String()+"/TraceDataReceived", span.Name())
+		require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.TransportKey, Value: attribute.StringValue(transport)})
+		switch {
+		case params[i].err == nil:
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedSpansKey, Value: attribute.Int64Value(int64(params[i].items))})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedSpansKey, Value: attribute.Int64Value(0)})
+			assert.Equal(t, codes.Unset, span.Status().Code)
+		case errors.Is(params[i].err, errFake):
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.AcceptedSpansKey, Value: attribute.Int64Value(0)})
+			require.Contains(t, span.Attributes(), attribute.KeyValue{Key: obsmetrics.RefusedSpansKey, Value: attribute.Int64Value(int64(params[i].items))})
+			assert.Equal(t, codes.Error, span.Status().Code)
+			assert.Equal(t, params[i].err.Error(), span.Status().Description)
+		default:
+			t.Fatalf("unexpected error: %v", params[i].err)
+		}
+	}
+}
+
+func TestProcessorTraceData(t *testing.T) {
+	testTelemetry(t, processorID, testProcessorTraceData)
+}
+
+func testProcessorTraceData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	const acceptedSpans = 27
+	const refusedSpans = 19
+	const droppedSpans = 13
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processorID,
+		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+	}, registry)
+	require.NoError(t, err)
+	obsrep.TracesAccepted(context.Background(), acceptedSpans)
+	obsrep.TracesRefused(context.Background(), refusedSpans)
+	obsrep.TracesDropped(context.Background(), droppedSpans)
+
+	require.NoError(t, tt.CheckProcessorTraces(acceptedSpans, refusedSpans, droppedSpans))
+}
+
+func TestProcessorMetricsData(t *testing.T) {
+	testTelemetry(t, processorID, testProcessorMetricsData)
+}
+
+func testProcessorMetricsData(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	const acceptedPoints = 29
+	const refusedPoints = 11
+	const droppedPoints = 17
+
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processorID,
+		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+	}, registry)
+	require.NoError(t, err)
+	obsrep.MetricsAccepted(context.Background(), acceptedPoints)
+	obsrep.MetricsRefused(context.Background(), refusedPoints)
+	obsrep.MetricsDropped(context.Background(), droppedPoints)
+
+	require.NoError(t, tt.CheckProcessorMetrics(acceptedPoints, refusedPoints, droppedPoints))
+}
+
+func TestBuildProcessorCustomMetricName(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{
+			name: "firstMeasure",
+			want: "processor/test_type/firstMeasure",
+		},
+		{
+			name: "secondMeasure",
+			want: "processor/test_type/secondMeasure",
 		},
 	}
-
-	if err := proc.createOtelMetrics(cfg); err != nil {
-		return nil, err
-	}
-
-	return proc, nil
-}
-
-func (por *Processor) createOtelMetrics(cfg ProcessorSettings) error {
-	if !por.useOtelForMetrics {
-		return nil
-	}
-	meter := cfg.ProcessorCreateSettings.MeterProvider.Meter(processorScope)
-	var errors, err error
-
-	por.acceptedSpansCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.AcceptedSpansKey,
-		instrument.WithDescription("Number of spans successfully pushed into the next component in the pipeline."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.refusedSpansCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.RefusedSpansKey,
-		instrument.WithDescription("Number of spans that were rejected by the next component in the pipeline."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.droppedSpansCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.DroppedSpansKey,
-		instrument.WithDescription("Number of spans that were dropped."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.acceptedMetricPointsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.AcceptedMetricPointsKey,
-		instrument.WithDescription("Number of metric points successfully pushed into the next component in the pipeline."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.refusedMetricPointsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.RefusedMetricPointsKey,
-		instrument.WithDescription("Number of metric points that were rejected by the next component in the pipeline."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.droppedMetricPointsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.DroppedMetricPointsKey,
-		instrument.WithDescription("Number of metric points that were dropped."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.acceptedLogRecordsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.AcceptedLogRecordsKey,
-		instrument.WithDescription("Number of log records successfully pushed into the next component in the pipeline."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.refusedLogRecordsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.RefusedLogRecordsKey,
-		instrument.WithDescription("Number of log records that were rejected by the next component in the pipeline."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	por.droppedLogRecordsCounter, err = meter.SyncInt64().Counter(
-		obsmetrics.ProcessorPrefix+obsmetrics.DroppedLogRecordsKey,
-		instrument.WithDescription("Number of log records that were dropped."),
-		instrument.WithUnit(unit.Dimensionless),
-	)
-	errors = multierr.Append(errors, err)
-
-	return errors
-}
-
-func (por *Processor) recordWithOtel(ctx context.Context, dataType component.DataType, accepted, refused, dropped int64) {
-	var acceptedCount, refusedCount, droppedCount syncint64.Counter
-	switch dataType {
-	case component.DataTypeTraces:
-		acceptedCount = por.acceptedSpansCounter
-		refusedCount = por.refusedSpansCounter
-		droppedCount = por.droppedSpansCounter
-	case component.DataTypeMetrics:
-		acceptedCount = por.acceptedMetricPointsCounter
-		refusedCount = por.refusedMetricPointsCounter
-		droppedCount = por.droppedMetricPointsCounter
-	case component.DataTypeLogs:
-		acceptedCount = por.acceptedLogRecordsCounter
-		refusedCount = por.refusedLogRecordsCounter
-		droppedCount = por.droppedLogRecordsCounter
-	}
-
-	acceptedCount.Add(ctx, accepted, por.otelAttrs...)
-	refusedCount.Add(ctx, refused, por.otelAttrs...)
-	droppedCount.Add(ctx, dropped, por.otelAttrs...)
-}
-
-func (por *Processor) recordWithOC(ctx context.Context, dataType component.DataType, accepted, refused, dropped int64) {
-	var acceptedMeasure, refusedMeasure, droppedMeasure *stats.Int64Measure
-
-	switch dataType {
-	case component.DataTypeTraces:
-		acceptedMeasure = obsmetrics.ProcessorAcceptedSpans
-		refusedMeasure = obsmetrics.ProcessorRefusedSpans
-		droppedMeasure = obsmetrics.ProcessorDroppedSpans
-	case component.DataTypeMetrics:
-		acceptedMeasure = obsmetrics.ProcessorAcceptedMetricPoints
-		refusedMeasure = obsmetrics.ProcessorRefusedMetricPoints
-		droppedMeasure = obsmetrics.ProcessorDroppedMetricPoints
-	case component.DataTypeLogs:
-		acceptedMeasure = obsmetrics.ProcessorAcceptedLogRecords
-		refusedMeasure = obsmetrics.ProcessorRefusedLogRecords
-		droppedMeasure = obsmetrics.ProcessorDroppedLogRecords
-	}
-
-	// ignore the error for now; should not happen
-	_ = stats.RecordWithTags(
-		ctx,
-		por.mutators,
-		acceptedMeasure.M(accepted),
-		refusedMeasure.M(refused),
-		droppedMeasure.M(dropped),
-	)
-}
-
-func (por *Processor) recordData(ctx context.Context, dataType component.DataType, accepted, refused, dropped int64) {
-	if por.useOtelForMetrics {
-		por.recordWithOtel(ctx, dataType, accepted, refused, dropped)
-	} else {
-		por.recordWithOC(ctx, dataType, accepted, refused, dropped)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildProcessorCustomMetricName("test_type", tt.name)
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }
 
-// TracesAccepted reports that the trace data was accepted.
-func (por *Processor) TracesAccepted(ctx context.Context, numSpans int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeTraces, int64(numSpans), int64(0), int64(0))
-	}
+func TestProcessorLogRecords(t *testing.T) {
+	testTelemetry(t, processorID, testProcessorLogRecords)
 }
 
-// TracesRefused reports that the trace data was refused.
-func (por *Processor) TracesRefused(ctx context.Context, numSpans int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeTraces, int64(0), int64(numSpans), int64(0))
-	}
-}
+func testProcessorLogRecords(t *testing.T, tt obsreporttest.TestTelemetry, registry *featuregate.Registry) {
+	const acceptedRecords = 29
+	const refusedRecords = 11
+	const droppedRecords = 17
 
-// TracesDropped reports that the trace data was dropped.
-func (por *Processor) TracesDropped(ctx context.Context, numSpans int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeTraces, int64(0), int64(0), int64(numSpans))
-	}
-}
+	obsrep, err := newProcessor(ProcessorSettings{
+		ProcessorID:             processorID,
+		ProcessorCreateSettings: tt.ToProcessorCreateSettings(),
+	}, registry)
+	require.NoError(t, err)
+	obsrep.LogsAccepted(context.Background(), acceptedRecords)
+	obsrep.LogsRefused(context.Background(), refusedRecords)
+	obsrep.LogsDropped(context.Background(), droppedRecords)
 
-// MetricsAccepted reports that the metrics were accepted.
-func (por *Processor) MetricsAccepted(ctx context.Context, numPoints int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeMetrics, int64(numPoints), int64(0), int64(0))
-	}
-}
-
-// MetricsRefused reports that the metrics were refused.
-func (por *Processor) MetricsRefused(ctx context.Context, numPoints int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeMetrics, int64(0), int64(numPoints), int64(0))
-	}
-}
-
-// MetricsDropped reports that the metrics were dropped.
-func (por *Processor) MetricsDropped(ctx context.Context, numPoints int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeMetrics, int64(0), int64(0), int64(numPoints))
-	}
-}
-
-// LogsAccepted reports that the logs were accepted.
-func (por *Processor) LogsAccepted(ctx context.Context, numRecords int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeLogs, int64(numRecords), int64(0), int64(0))
-	}
-}
-
-// LogsRefused reports that the logs were refused.
-func (por *Processor) LogsRefused(ctx context.Context, numRecords int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeLogs, int64(0), int64(numRecords), int64(0))
-	}
-}
-
-// LogsDropped reports that the logs were dropped.
-func (por *Processor) LogsDropped(ctx context.Context, numRecords int) {
-	if por.level != configtelemetry.LevelNone {
-		por.recordData(ctx, component.DataTypeLogs, int64(0), int64(0), int64(numRecords))
-	}
+	require.NoError(t, tt.CheckProcessorLogs(acceptedRecords, refusedRecords, droppedRecords))
 }
