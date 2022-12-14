@@ -107,7 +107,8 @@ func SetupTelemetry() (TestTelemetry, error) {
 	}
 	settings.TelemetrySettings.TracerProvider = tp
 	settings.TelemetrySettings.MetricsLevel = configtelemetry.LevelNormal
-	settings.views = obsreportconfig.AllViews(configtelemetry.LevelNormal)
+	obsMetrics := obsreportconfig.Configure(configtelemetry.LevelNormal)
+	settings.views = obsMetrics.Views
 	err := view.Register(settings.views...)
 	if err != nil {
 		return settings, err
