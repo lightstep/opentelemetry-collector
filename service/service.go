@@ -25,12 +25,15 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configtelemetry"
+<<<<<<< HEAD
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/processor"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/internal/obsreportconfig"
+=======
+>>>>>>> e98ccc24 (refactor and add basic test)
 	"go.opentelemetry.io/collector/service/extensions"
 	"go.opentelemetry.io/collector/service/internal/proctelemetry"
 	"go.opentelemetry.io/collector/service/telemetry"
@@ -212,16 +215,10 @@ func (srv *Service) initExtensionsAndPipeline(ctx context.Context, set Settings,
 		return fmt.Errorf("cannot build pipelines: %w", err)
 	}
 
-	if cfg.Telemetry.Metrics.Level != configtelemetry.LevelNone && cfg.Telemetry.Metrics.Address != "" {
-		// The process telemetry initialization requires the ballast size, which is available after the extensions are initialized.
-		if srv.telemetryInitializer.registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID) {
-			if err = proctelemetry.OtelRegisterProcessMetrics(context.Background(), srv.telemetrySettings, getBallastSize(srv.host)); err != nil {
-				return fmt.Errorf("failed to register process metrics: %w", err)
-			}
-		} else { // use OC metrics
-			if err = proctelemetry.RegisterProcessMetrics(srv.telemetryInitializer.ocRegistry, getBallastSize(srv.host)); err != nil {
-				return fmt.Errorf("failed to register process metrics: %w", err)
-			}
+	if set.Config.Service.Telemetry.Metrics.Level != configtelemetry.LevelNone && set.Config.Service.Telemetry.Metrics.Address != "" {
+		processMetrics := proctelemetry.NewProcessMetrics(srv.telemetrySettings.Logger, srv.telemetryInitializer.registry, srv.telemetryInitializer.mp, getBallastSize(srv.host))
+		if err = processMetrics.RegisterProcessMetrics(context.Background(), srv.telemetryInitializer.ocRegistry); err != nil {
+			return fmt.Errorf("failed to register process metrics: %w", err)
 		}
 	}
 

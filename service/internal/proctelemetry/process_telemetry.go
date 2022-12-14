@@ -33,7 +33,8 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
-	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/featuregate"
+	"go.opentelemetry.io/collector/internal/obsreportconfig"
 )
 
 const (
@@ -74,29 +75,51 @@ type processMetrics struct {
 	ms         *runtime.MemStats
 }
 
-func OtelRegisterProcessMetrics(ctx context.Context, cfg component.TelemetrySettings, ballastSizeBytes uint64) error {
+func NewProcessMetrics(logger *zap.Logger, registry *featuregate.Registry, meter otelmetric.MeterProvider, ballastSizeBytes uint64) *processMetrics {
 	pm := &processMetrics{
 		startTimeUnixNano: time.Now().UnixNano(),
 		ballastSizeBytes:  ballastSizeBytes,
 		ms:                &runtime.MemStats{},
-		logger:            cfg.Logger,
-		meter:             cfg.MeterProvider.Meter(scopeName),
-		otelAttrs:         []attribute.KeyValue{},
+	    useOtelForMetrics: registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
+		logger:            logger,
 	}
+
+	if pm.useOtelForMetrics {
+		pm.meter = meter.Meter(scopeName)
+	}
+
+	return pm
+}
+
+// RegisterProcessMetrics creates a new set of processMetrics (mem, cpu) that can be used to measure
+// basic information about this process.
+func (pm *processMetrics) RegisterProcessMetrics(ctx context.Context, ocRegistry *ocmetric.Registry) error {
 	var err error
 	pm.proc, err = process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		return err
 	}
 
-	err = pm.createOtelMetrics()
-	if err != nil {
-		return err
-	}
+	if pm.useOtelForMetrics {
+		err = pm.createOtelMetrics()
+		if err != nil {
+			return err
+		}
 
-	err = pm.recordWithOtel(ctx)
-	if err != nil {
-		return err
+		err = pm.recordWithOtel(context.Background())
+		if err != nil {
+			return err
+		}
+	} else { // record with OC
+		err = pm.createOCMetrics(ocRegistry)
+		if err != nil {
+			return err
+		}
+
+		err = pm.recordWithOC()
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -179,33 +202,6 @@ func (pm *processMetrics) recordWithOtel(ctx context.Context) error {
 	errors = multierr.Append(errors, err)
 
 	return errors
-}
-
-// RegisterProcessMetrics creates a new set of processMetrics (mem, cpu) that can be used to measure
-// basic information about this process.
-func RegisterProcessMetrics(registry *ocmetric.Registry, ballastSizeBytes uint64) error {
-	pm := &processMetrics{
-		startTimeUnixNano: time.Now().UnixNano(),
-		ballastSizeBytes:  ballastSizeBytes,
-		ms:                &runtime.MemStats{},
-	}
-	var err error
-	pm.proc, err = process.NewProcess(int32(os.Getpid()))
-	if err != nil {
-		return err
-	}
-
-	err = pm.createOCMetrics(registry)
-	if err != nil {
-		return err
-	}
-
-	err = pm.recordWithOC()
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (pm *processMetrics) createOCMetrics(registry *ocmetric.Registry) error {

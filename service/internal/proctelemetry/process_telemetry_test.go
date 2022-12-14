@@ -15,6 +15,8 @@
 package proctelemetry
 
 import (
+	"context"
+	"runtime"
 	"testing"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opencensus.io/metric"
 	"go.opencensus.io/metric/metricdata"
+	otelmetric "go.opentelemetry.io/otel/metric"
 )
 
 var expectedMetrics = []string{
@@ -36,9 +39,35 @@ var expectedMetrics = []string{
 	"process/memory/rss",
 }
 
-func TestProcessTelemetry(t *testing.T) {
+func TestOtelProcessTelemetry(t *testing.T) {
+	pm := &processMetrics{
+		startTimeUnixNano: time.Now().UnixNano(),
+		ballastSizeBytes:  0,
+		ms:                &runtime.MemStats{},
+	    useOtelForMetrics: true,
+	}
+	meterProvider := otelmetric.NewNoopMeterProvider()
+	pm.meter = meterProvider.Meter("test")
+	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil))
+
+	assert.NotNil(t, pm.otelProcessUptime)
+	assert.NotNil(t, pm.otelAllocMem)
+	assert.NotNil(t, pm.otelTotalAllocMem)
+	assert.NotNil(t, pm.otelSysMem)
+	assert.NotNil(t, pm.otelCpuSeconds)
+	assert.NotNil(t, pm.otelRssMemory)
+}
+
+func TestOCProcessTelemetry(t *testing.T) {
 	registry := metric.NewRegistry()
-	require.NoError(t, RegisterProcessMetrics(registry, 0))
+	pm := &processMetrics{
+		startTimeUnixNano: time.Now().UnixNano(),
+		ballastSizeBytes:  0,
+		ms:                &runtime.MemStats{},
+	    useOtelForMetrics: false,
+	}
+
+	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), registry))
 
 	// Check that the metrics are actually filled.
 	<-time.After(200 * time.Millisecond)
@@ -71,13 +100,15 @@ func TestProcessTelemetry(t *testing.T) {
 }
 
 func TestProcessTelemetryFailToRegister(t *testing.T) {
-
+	pm := &processMetrics{
+	    useOtelForMetrics: false,
+	}
 	for _, metricName := range expectedMetrics {
 		t.Run(metricName, func(t *testing.T) {
 			registry := metric.NewRegistry()
 			_, err := registry.AddFloat64Gauge(metricName)
 			require.NoError(t, err)
-			assert.Error(t, RegisterProcessMetrics(registry, 0))
+			assert.Error(t, pm.RegisterProcessMetrics(context.Background(), registry))
 		})
 	}
 }
