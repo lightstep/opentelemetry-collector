@@ -40,6 +40,11 @@ var (
 	processorScope = scopeName + nameSep + processorName
 )
 
+var (
+	processorName  = "processor"
+	processorScope = scopeName + nameSep + processorName
+)
+
 // BuildProcessorCustomMetricName is used to be build a metric name following
 // the standards used in the Collector. The configType should be the same
 // value used to identify the type on the config.
