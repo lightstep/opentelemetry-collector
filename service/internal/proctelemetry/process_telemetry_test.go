@@ -126,10 +126,10 @@ func TestOtelProcessTelemetry(t *testing.T) {
 	pm.meter = tel.MeterProvider.Meter("test")
 	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil))
 
-	mp, _ := fetchPrometheusMetrics(tel.promHandler)
+	mp, err := fetchPrometheusMetrics(tel.promHandler)
+	require.NoError(t, err)
 
 	for _, metricName := range tel.expectedMetrics {
-		_, _ = view.RetrieveData(metricName)
 		metric, ok := mp[metricName]
 		require.True(t, ok)
 		require.True(t, len(metric.Metric) == 1)
