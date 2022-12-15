@@ -16,16 +16,38 @@ package proctelemetry
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	io_prometheus_client "github.com/prometheus/client_model/go"
+	"github.com/prometheus/common/expfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opencensus.io/metric"
 	"go.opencensus.io/metric/metricdata"
-	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opencensus.io/stats/view"
+	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/config/configtelemetry"
+	"go.opentelemetry.io/collector/internal/obsreportconfig"
 )
+
+type testTelemetry struct {
+	component.TelemetrySettings
+	views           []*view.View
+	promHandler     http.Handler
+	meterProvider   *sdkmetric.MeterProvider
+	expectedMetrics []string
+}
 
 var expectedMetrics = []string{
 	// Changing a metric name is a breaking change.
@@ -39,23 +61,82 @@ var expectedMetrics = []string{
 	"process/memory/rss",
 }
 
+var otelExpectedMetrics = []string{
+	// OTel Go adds `_total` suffix
+	"process_uptime_total",
+	"process_runtime_heap_alloc_bytes_total",
+	"process_runtime_total_alloc_bytes_total",
+	"process_runtime_total_sys_memory_bytes_total",
+	"process_cpu_seconds_total",
+	"process_memory_rss_total",
+}
+
+func setupTelemetry(t *testing.T) testTelemetry {
+	settings := testTelemetry{
+		TelemetrySettings: componenttest.NewNopTelemetrySettings(),
+		expectedMetrics:   otelExpectedMetrics,
+	}
+	settings.TelemetrySettings.MetricsLevel = configtelemetry.LevelNormal
+
+	obsMetrics := obsreportconfig.Configure(configtelemetry.LevelNormal)
+	settings.views = obsMetrics.Views
+	err := view.Register(settings.views...)
+	require.NoError(t, err)
+
+	promReg := prometheus.NewRegistry()
+	exporter, err := otelprom.New(otelprom.WithRegisterer(promReg), otelprom.WithoutUnits())
+	require.NoError(t, err)
+
+	settings.meterProvider = sdkmetric.NewMeterProvider(
+		sdkmetric.WithResource(resource.Empty()),
+		sdkmetric.WithReader(exporter),
+	)
+	settings.TelemetrySettings.MeterProvider = settings.meterProvider
+
+	settings.promHandler = promhttp.HandlerFor(promReg, promhttp.HandlerOpts{})
+
+	t.Cleanup(func() { assert.NoError(t, settings.meterProvider.Shutdown(context.Background())) })
+
+	return settings
+}
+
+func fetchPrometheusMetrics(handler http.Handler) (map[string]*io_prometheus_client.MetricFamily, error) {
+	req, err := http.NewRequest("GET", "/metrics", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	var parser expfmt.TextParser
+	return parser.TextToMetricFamilies(rr.Body)
+}
+
 func TestOtelProcessTelemetry(t *testing.T) {
+	tel := setupTelemetry(t)
+
 	pm := &processMetrics{
 		startTimeUnixNano: time.Now().UnixNano(),
 		ballastSizeBytes:  0,
 		ms:                &runtime.MemStats{},
-	    useOtelForMetrics: true,
+		useOtelForMetrics: true,
 	}
-	meterProvider := otelmetric.NewNoopMeterProvider()
-	pm.meter = meterProvider.Meter("test")
+
+	pm.meter = tel.MeterProvider.Meter("test")
 	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil))
 
-	assert.NotNil(t, pm.otelProcessUptime)
-	assert.NotNil(t, pm.otelAllocMem)
-	assert.NotNil(t, pm.otelTotalAllocMem)
-	assert.NotNil(t, pm.otelSysMem)
-	assert.NotNil(t, pm.otelCpuSeconds)
-	assert.NotNil(t, pm.otelRssMemory)
+	mp, _ := fetchPrometheusMetrics(tel.promHandler)
+
+	for _, metricName := range tel.expectedMetrics {
+		_, _ = view.RetrieveData(metricName)
+		metric, ok := mp[metricName]
+		require.True(t, ok)
+		require.True(t, len(metric.Metric) == 1)
+		require.True(t, metric.GetType() == io_prometheus_client.MetricType_COUNTER)
+		metricValue := metric.Metric[0].GetCounter().GetValue()
+		assert.True(t, metricValue > 0)
+	}
 }
 
 func TestOCProcessTelemetry(t *testing.T) {
@@ -64,7 +145,7 @@ func TestOCProcessTelemetry(t *testing.T) {
 		startTimeUnixNano: time.Now().UnixNano(),
 		ballastSizeBytes:  0,
 		ms:                &runtime.MemStats{},
-	    useOtelForMetrics: false,
+		useOtelForMetrics: false,
 	}
 
 	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), registry))
@@ -101,7 +182,7 @@ func TestOCProcessTelemetry(t *testing.T) {
 
 func TestProcessTelemetryFailToRegister(t *testing.T) {
 	pm := &processMetrics{
-	    useOtelForMetrics: false,
+		useOtelForMetrics: false,
 	}
 	for _, metricName := range expectedMetrics {
 		t.Run(metricName, func(t *testing.T) {

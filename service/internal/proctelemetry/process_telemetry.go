@@ -27,8 +27,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
 	"go.opentelemetry.io/otel/metric/instrument/asyncfloat64"
+	"go.opentelemetry.io/otel/metric/instrument/asyncint64"
 	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -38,9 +38,8 @@ import (
 )
 
 const (
-	scopeName = "go.opentelemetry.io/collector/service/internal/proctelemetry"
+	scopeName      = "go.opentelemetry.io/collector/service/internal/proctelemetry"
 	processNameKey = "process_name"
-
 )
 
 // processMetrics is a struct that contains views related to process metrics (cpu, mem, etc)
@@ -64,10 +63,10 @@ type processMetrics struct {
 	otelCpuSeconds    asyncfloat64.Counter
 	otelRssMemory     asyncint64.Counter
 
-	meter                otelmetric.Meter
-	logger               *zap.Logger
-	useOtelForMetrics    bool
-	otelAttrs            []attribute.KeyValue
+	meter             otelmetric.Meter
+	logger            *zap.Logger
+	useOtelForMetrics bool
+	otelAttrs         []attribute.KeyValue
 
 	// mu protects everything bellow.
 	mu         sync.Mutex
@@ -80,7 +79,7 @@ func NewProcessMetrics(logger *zap.Logger, registry *featuregate.Registry, meter
 		startTimeUnixNano: time.Now().UnixNano(),
 		ballastSizeBytes:  ballastSizeBytes,
 		ms:                &runtime.MemStats{},
-	    useOtelForMetrics: registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
+		useOtelForMetrics: registry.IsEnabled(obsreportconfig.UseOtelForInternalMetricsfeatureGateID),
 		logger:            logger,
 	}
 
@@ -106,7 +105,7 @@ func (pm *processMetrics) RegisterProcessMetrics(ctx context.Context, ocRegistry
 			return err
 		}
 
-		err = pm.recordWithOtel(context.Background())
+		err = pm.recordWithOtel(ctx)
 		if err != nil {
 			return err
 		}
@@ -129,37 +128,37 @@ func (pm *processMetrics) createOtelMetrics() error {
 	var errors, err error
 
 	pm.otelProcessUptime, err = pm.meter.AsyncFloat64().Counter(
-		"process/uptime",
+		"process_uptime",
 		instrument.WithDescription("Uptime of the process"),
 		instrument.WithUnit(unit.Milliseconds))
 	errors = multierr.Append(errors, err)
 
 	pm.otelAllocMem, err = pm.meter.AsyncInt64().Counter(
-		"process/runtime/heap_alloc_bytes",
+		"process_runtime_heap_alloc_bytes",
 		instrument.WithDescription("Bytes of allocated heap objects (see 'go doc runtime.MemStats.HeapAlloc')"),
 		instrument.WithUnit(unit.Bytes))
 	errors = multierr.Append(errors, err)
 
 	pm.otelTotalAllocMem, err = pm.meter.AsyncInt64().Counter(
-		"process/runtime/total_alloc_bytes",
+		"process_runtime_total_alloc_bytes",
 		instrument.WithDescription("Cumulative bytes allocated for heap objects (see 'go doc runtime.MemStats.TotalAlloc')"),
 		instrument.WithUnit(unit.Bytes))
 	errors = multierr.Append(errors, err)
 
 	pm.otelSysMem, err = pm.meter.AsyncInt64().Counter(
-		"process/runtime/total_sys_memory_bytes",
+		"process_runtime_total_sys_memory_bytes",
 		instrument.WithDescription("Total bytes of memory obtained from the OS (see 'go doc runtime.MemStats.Sys')"),
 		instrument.WithUnit(unit.Bytes))
 	errors = multierr.Append(errors, err)
 
 	pm.otelCpuSeconds, err = pm.meter.AsyncFloat64().Counter(
-		"process/cpu_seconds",
+		"process_cpu_seconds",
 		instrument.WithDescription("Total CPU user and system time in seconds"),
 		instrument.WithUnit(unit.Milliseconds))
 	errors = multierr.Append(errors, err)
 
 	pm.otelRssMemory, err = pm.meter.AsyncInt64().Counter(
-		"process/memory/rss",
+		"process_memory_rss",
 		instrument.WithDescription("Total physical memory (resident set size)"),
 		instrument.WithUnit(unit.Bytes))
 	errors = multierr.Append(errors, err)
@@ -171,33 +170,33 @@ func (pm *processMetrics) recordWithOtel(ctx context.Context) error {
 	var errors, err error
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelProcessUptime}, func(ctx context.Context) {
 		processTimeMs := 1000 * pm.updateProcessUptime()
-		pm.otelProcessUptime.Observe(ctx, processTimeMs, pm.otelAttrs...)
+		pm.otelProcessUptime.Observe(ctx, processTimeMs)
 	})
 	errors = multierr.Append(errors, err)
 
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelAllocMem}, func(ctx context.Context) {
-		pm.otelAllocMem.Observe(ctx, pm.updateAllocMem(), pm.otelAttrs...)
+		pm.otelAllocMem.Observe(ctx, pm.updateAllocMem())
 	})
 	errors = multierr.Append(errors, err)
 
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelTotalAllocMem}, func(ctx context.Context) {
-		pm.otelTotalAllocMem.Observe(ctx, pm.updateTotalAllocMem(), pm.otelAttrs...)
+		pm.otelTotalAllocMem.Observe(ctx, pm.updateTotalAllocMem())
 	})
 	errors = multierr.Append(errors, err)
 
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelSysMem}, func(ctx context.Context) {
-		pm.otelSysMem.Observe(ctx, pm.updateSysMem(), pm.otelAttrs...)
+		pm.otelSysMem.Observe(ctx, pm.updateSysMem())
 	})
 	errors = multierr.Append(errors, err)
 
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelCpuSeconds}, func(ctx context.Context) {
 		cpuMs := 1000 * pm.updateCPUSeconds()
-		pm.otelCpuSeconds.Observe(ctx, cpuMs, pm.otelAttrs...)
+		pm.otelCpuSeconds.Observe(ctx, cpuMs)
 	})
 	errors = multierr.Append(errors, err)
 
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelRssMemory}, func(ctx context.Context) {
-		pm.otelRssMemory.Observe(ctx, pm.updateRSSMemory(), pm.otelAttrs...)
+		pm.otelRssMemory.Observe(ctx, pm.updateRSSMemory())
 	})
 	errors = multierr.Append(errors, err)
 
