@@ -123,7 +123,7 @@ func TestOtelProcessTelemetry(t *testing.T) {
 	}
 
 	pm.meter = tel.MeterProvider.Meter("test")
-	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil, ))
+	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil))
 
 	mp, err := fetchPrometheusMetrics(tel.promHandler)
 	require.NoError(t, err)
