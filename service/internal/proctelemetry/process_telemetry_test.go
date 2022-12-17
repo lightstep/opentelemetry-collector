@@ -63,12 +63,12 @@ var expectedMetrics = []string{
 
 var otelExpectedMetrics = []string{
 	// OTel Go adds `_total` suffix
-	"process_uptime_total",
-	"process_runtime_heap_alloc_bytes_total",
-	"process_runtime_total_alloc_bytes_total",
-	"process_runtime_total_sys_memory_bytes_total",
-	"process_cpu_seconds_total",
-	"process_memory_rss_total",
+	"process_uptime",
+	"process_runtime_heap_alloc_bytes",
+	"process_runtime_total_alloc_bytes",
+	"process_runtime_total_sys_memory_bytes",
+	"process_cpu_seconds",
+	"process_memory_rss",
 }
 
 func setupTelemetry(t *testing.T) testTelemetry {
@@ -78,8 +78,7 @@ func setupTelemetry(t *testing.T) testTelemetry {
 	}
 	settings.TelemetrySettings.MetricsLevel = configtelemetry.LevelNormal
 
-	obsMetrics := obsreportconfig.Configure(configtelemetry.LevelNormal)
-	settings.views = obsMetrics.Views
+	settings.views = obsreportconfig.AllViews(configtelemetry.LevelNormal)
 	err := view.Register(settings.views...)
 	require.NoError(t, err)
 
@@ -124,17 +123,26 @@ func TestOtelProcessTelemetry(t *testing.T) {
 	}
 
 	pm.meter = tel.MeterProvider.Meter("test")
-	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil))
+	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil, ))
 
 	mp, err := fetchPrometheusMetrics(tel.promHandler)
 	require.NoError(t, err)
 
 	for _, metricName := range tel.expectedMetrics {
 		metric, ok := mp[metricName]
+		if !ok {
+			withSuffix := metricName + "_total"
+			metric, ok = mp[withSuffix]
+		}
 		require.True(t, ok)
 		require.True(t, len(metric.Metric) == 1)
-		require.True(t, metric.GetType() == io_prometheus_client.MetricType_COUNTER)
-		metricValue := metric.Metric[0].GetCounter().GetValue()
+		// require.True(t, metric.GetType() == io_prometheus_client.MetricType_COUNTER)
+		var metricValue float64
+		if metric.GetType() == io_prometheus_client.MetricType_COUNTER {
+			metricValue = metric.Metric[0].GetCounter().GetValue()
+		} else {
+			metricValue = metric.Metric[0].GetGauge().GetValue()
+		}
 		assert.True(t, metricValue > 0)
 	}
 }
