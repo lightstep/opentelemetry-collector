@@ -185,7 +185,7 @@ func (pm *processMetrics) createOtelMetrics() error {
 	pm.otelProcessUptime, err = pm.meter.AsyncFloat64().Counter(
 		"process_uptime",
 		instrument.WithDescription("Uptime of the process"),
-		instrument.WithUnit(unit.Milliseconds))
+		instrument.WithUnit(unit.Unit("s")))
 	errors = multierr.Append(errors, err)
 
 	pm.otelAllocMem, err = pm.meter.AsyncInt64().Gauge(
@@ -209,7 +209,7 @@ func (pm *processMetrics) createOtelMetrics() error {
 	pm.otelCpuSeconds, err = pm.meter.AsyncFloat64().Counter(
 		"process_cpu_seconds",
 		instrument.WithDescription("Total CPU user and system time in seconds"),
-		instrument.WithUnit(unit.Milliseconds))
+		instrument.WithUnit(unit.Unit("s")))
 	errors = multierr.Append(errors, err)
 
 	pm.otelRssMemory, err = pm.meter.AsyncInt64().Gauge(
@@ -224,8 +224,7 @@ func (pm *processMetrics) createOtelMetrics() error {
 func (pm *processMetrics) recordWithOtel(ctx context.Context) error {
 	var errors, err error
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelProcessUptime}, func(ctx context.Context) {
-		processTimeMs := 1000 * pm.updateProcessUptime()
-		pm.otelProcessUptime.Observe(ctx, processTimeMs)
+		pm.otelProcessUptime.Observe(ctx, pm.updateProcessUptime())
 	})
 	errors = multierr.Append(errors, err)
 
@@ -245,8 +244,7 @@ func (pm *processMetrics) recordWithOtel(ctx context.Context) error {
 	errors = multierr.Append(errors, err)
 
 	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelCpuSeconds}, func(ctx context.Context) {
-		cpuMs := 1000 * pm.updateCPUSeconds()
-		pm.otelCpuSeconds.Observe(ctx, cpuMs)
+		pm.otelCpuSeconds.Observe(ctx, pm.updateCPUSeconds())
 	})
 	errors = multierr.Append(errors, err)
 
