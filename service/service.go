@@ -212,8 +212,7 @@ func (srv *Service) initExtensionsAndPipeline(ctx context.Context, set Settings,
 	}
 
 	if cfg.Telemetry.Metrics.Level != configtelemetry.LevelNone && cfg.Telemetry.Metrics.Address != "" {
-		processMetrics := proctelemetry.NewProcessMetrics(srv.telemetryInitializer.registry, srv.telemetryInitializer.mp, getBallastSize(srv.host))
-		if err = processMetrics.RegisterProcessMetrics(context.Background(), srv.telemetryInitializer.ocRegistry); err != nil {
+		if err = proctelemetry.RegisterProcessMetrics(context.Background(), srv.telemetryInitializer.ocRegistry, srv.telemetryInitializer.mp, srv.telemetryInitializer.registry, getBallastSize(srv.host)); err != nil {
 			return fmt.Errorf("failed to register process metrics: %w", err)
 		}
 	}
