@@ -18,7 +18,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"testing"
 	"time"
 
@@ -32,12 +31,14 @@ import (
 	"go.opencensus.io/metric/metricdata"
 	"go.opencensus.io/stats/view"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
+	otelmetric "go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configtelemetry"
+	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/internal/obsreportconfig"
 )
 
@@ -114,16 +115,11 @@ func fetchPrometheusMetrics(handler http.Handler) (map[string]*io_prometheus_cli
 
 func TestOtelProcessTelemetry(t *testing.T) {
 	tel := setupTelemetry(t)
+	registry := featuregate.NewRegistry()
+	obsreportconfig.RegisterInternalMetricFeatureGate(registry)
+	require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: true}))
 
-	pm := &processMetrics{
-		startTimeUnixNano: time.Now().UnixNano(),
-		ballastSizeBytes:  0,
-		ms:                &runtime.MemStats{},
-		useOtelForMetrics: true,
-	}
-
-	pm.meter = tel.MeterProvider.Meter("test")
-	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), nil))
+	require.NoError(t, RegisterProcessMetrics(context.Background(), nil, tel.MeterProvider, registry, 0))
 
 	mp, err := fetchPrometheusMetrics(tel.promHandler)
 	require.NoError(t, err)
@@ -148,20 +144,17 @@ func TestOtelProcessTelemetry(t *testing.T) {
 }
 
 func TestOCProcessTelemetry(t *testing.T) {
-	registry := metric.NewRegistry()
-	pm := &processMetrics{
-		startTimeUnixNano: time.Now().UnixNano(),
-		ballastSizeBytes:  0,
-		ms:                &runtime.MemStats{},
-		useOtelForMetrics: false,
-	}
+	ocRegistry := metric.NewRegistry()
+	registry := featuregate.NewRegistry()
+	obsreportconfig.RegisterInternalMetricFeatureGate(registry)
+	require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: false}))
 
-	require.NoError(t, pm.RegisterProcessMetrics(context.Background(), registry))
+	require.NoError(t, RegisterProcessMetrics(context.Background(), ocRegistry, otelmetric.NewNoopMeterProvider(), registry, 0))
 
 	// Check that the metrics are actually filled.
 	<-time.After(200 * time.Millisecond)
 
-	metrics := registry.Read()
+	metrics := ocRegistry.Read()
 
 	for _, metricName := range expectedMetrics {
 		m := findMetric(metrics, metricName)
@@ -189,15 +182,15 @@ func TestOCProcessTelemetry(t *testing.T) {
 }
 
 func TestProcessTelemetryFailToRegister(t *testing.T) {
-	pm := &processMetrics{
-		useOtelForMetrics: false,
-	}
+	registry := featuregate.NewRegistry()
+	obsreportconfig.RegisterInternalMetricFeatureGate(registry)
+	require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: false}))
 	for _, metricName := range expectedMetrics {
 		t.Run(metricName, func(t *testing.T) {
-			registry := metric.NewRegistry()
-			_, err := registry.AddFloat64Gauge(metricName)
+			ocRegistry := metric.NewRegistry()
+			_, err := ocRegistry.AddFloat64Gauge(metricName)
 			require.NoError(t, err)
-			assert.Error(t, pm.RegisterProcessMetrics(context.Background(), registry))
+			assert.Error(t, RegisterProcessMetrics(context.Background(), ocRegistry, otelmetric.NewNoopMeterProvider(), registry, 0))
 		})
 	}
 }

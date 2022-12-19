@@ -24,7 +24,6 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 	"go.opencensus.io/metric"
 	"go.opencensus.io/stats"
-	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
 	"go.opentelemetry.io/otel/metric/instrument/asyncfloat64"
@@ -64,7 +63,6 @@ type processMetrics struct {
 
 	meter             otelmetric.Meter
 	useOtelForMetrics bool
-	otelAttrs         []attribute.KeyValue
 
 	// mu protects everything bellow.
 	mu         sync.Mutex
@@ -72,7 +70,10 @@ type processMetrics struct {
 	ms         *runtime.MemStats
 }
 
-func NewProcessMetrics(registry *featuregate.Registry, meter otelmetric.MeterProvider, ballastSizeBytes uint64) *processMetrics {
+// RegisterProcessMetrics creates a new set of processMetrics (mem, cpu) that can be used to measure
+// basic information about this process.
+func RegisterProcessMetrics(ctx context.Context, ocRegistry *metric.Registry, mp otelmetric.MeterProvider, registry *featuregate.Registry, ballastSizeBytes uint64) error {
+	var err error
 	pm := &processMetrics{
 		startTimeUnixNano: time.Now().UnixNano(),
 		ballastSizeBytes:  ballastSizeBytes,
@@ -81,16 +82,8 @@ func NewProcessMetrics(registry *featuregate.Registry, meter otelmetric.MeterPro
 	}
 
 	if pm.useOtelForMetrics {
-		pm.meter = meter.Meter(scopeName)
+		pm.meter = mp.Meter(scopeName)
 	}
-
-	return pm
-}
-
-// RegisterProcessMetrics creates a new set of processMetrics (mem, cpu) that can be used to measure
-// basic information about this process.
-func (pm *processMetrics) RegisterProcessMetrics(ctx context.Context, ocRegistry *metric.Registry) error {
-	var err error
 	pm.proc, err = process.NewProcess(int32(os.Getpid()))
 	if err != nil {
 		return err
