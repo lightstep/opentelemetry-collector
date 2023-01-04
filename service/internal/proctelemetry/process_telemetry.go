@@ -58,7 +58,7 @@ type processMetrics struct {
 	otelTotalAllocMem asyncint64.Counter
 	otelSysMem        asyncint64.Gauge
 	otelCpuSeconds    asyncfloat64.Counter
-	otelRssMemory     asyncint64.Gauge
+	otelRSSMemory     asyncint64.Gauge
 
 	meter             otelmetric.Meter
 	useOtelForMetrics bool
@@ -239,15 +239,15 @@ func (pm *processMetrics) recordWithOtel(ctx context.Context) error {
 		return err
 	}
 
-	pm.otelRssMemory, err = pm.meter.AsyncInt64().Gauge(
+	pm.otelRSSMemory, err = pm.meter.AsyncInt64().Gauge(
 		"process_memory_rss",
 		instrument.WithDescription("Total physical memory (resident set size)"),
 		instrument.WithUnit(unit.Bytes))
 	if err != nil {
 		return err
 	}
-	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelRssMemory}, func(ctx context.Context) {
-		pm.otelRssMemory.Observe(ctx, pm.updateRSSMemory())
+	err = pm.meter.RegisterCallback([]instrument.Asynchronous{pm.otelRSSMemory}, func(ctx context.Context) {
+		pm.otelRSSMemory.Observe(ctx, pm.updateRSSMemory())
 	})
 	if err != nil {
 		return err
