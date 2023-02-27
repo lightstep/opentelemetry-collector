@@ -5,7 +5,7 @@ module go.opentelemetry.io/collector/cmd/otelcorecol
 go 1.18
 
 require (
-	github.com/stretchr/testify v1.8.1
+	github.com/stretchr/testify v1.8.2
 	go.opentelemetry.io/collector v0.67.0
 	go.opentelemetry.io/collector/component v0.67.0
 	go.opentelemetry.io/collector/exporter/loggingexporter v0.67.0
