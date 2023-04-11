@@ -20,7 +20,6 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/confmap"
 )
@@ -37,14 +36,12 @@ var (
 
 // Config defines configuration for logging exporter.
 type Config struct {
-	// Deprecated: [v0.68.0] will be removed soon.
-	config.ExporterSettings `mapstructure:",squash"`
 	// LogLevel defines log level of the logging exporter; options are debug, info, warn, error.
 	// Deprecated: Use `Verbosity` instead.
-	LogLevel zapcore.Level `mapstructure:"loglevel"`
+	LogLevel zapcore.Level `mapstructure:"loglevel,omitempty"`
 
 	// Verbosity defines the logging exporter verbosity.
-	Verbosity configtelemetry.Level `mapstructure:"verbosity"`
+	Verbosity configtelemetry.Level `mapstructure:"verbosity,omitempty"`
 
 	// SamplingInitial defines how many samples are initially logged during each second.
 	SamplingInitial int `mapstructure:"sampling_initial"`

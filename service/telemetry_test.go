@@ -28,13 +28,10 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configtelemetry"
-	"go.opentelemetry.io/collector/featuregate"
-	"go.opentelemetry.io/collector/internal/obsreportconfig"
 	"go.opentelemetry.io/collector/internal/testutil"
 	semconv "go.opentelemetry.io/collector/semconv/v1.5.0"
 	"go.opentelemetry.io/collector/service/telemetry"
@@ -120,13 +117,9 @@ func TestTelemetryInit(t *testing.T) {
 			name:    "UseOpenTelemetryForInternalMetrics",
 			useOtel: true,
 			expectedMetrics: map[string]metricValue{
-				metricPrefix + ocPrefix + counterName: {
-					value: 13,
-					labels: map[string]string{
-						"service_name":        "otelcol",
-						"service_version":     "latest",
-						"service_instance_id": testInstanceID,
-					},
+				metricPrefix + ocPrefix + counterName + "_total": {
+					value:  13,
+					labels: map[string]string{},
 				},
 				metricPrefix + otelPrefix + counterName + "_total": {
 					value:  13,
@@ -144,11 +137,7 @@ func TestTelemetryInit(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			registry := featuregate.NewRegistry()
-			obsreportconfig.RegisterInternalMetricFeatureGate(registry)
-			require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: tc.useOtel}))
-
-			tel := newColTelemetry(registry)
+			tel := newColTelemetry(tc.useOtel)
 			buildInfo := component.NewDefaultBuildInfo()
 			cfg := telemetry.Config{
 				Resource: map[string]*string{
@@ -194,7 +183,7 @@ func TestTelemetryInit(t *testing.T) {
 
 func createTestMetrics(t *testing.T, mp metric.MeterProvider) *view.View {
 	// Creates a OTel Go counter
-	counter, err := mp.Meter("collector_test").SyncInt64().Counter(otelPrefix+counterName, instrument.WithUnit(unit.Milliseconds))
+	counter, err := mp.Meter("collector_test").Int64Counter(otelPrefix+counterName, instrument.WithUnit("ms"))
 	require.NoError(t, err)
 	counter.Add(context.Background(), 13)
 
@@ -218,7 +207,7 @@ func createTestMetrics(t *testing.T, mp metric.MeterProvider) *view.View {
 }
 
 func getMetricsFromPrometheus(t *testing.T, handler http.Handler) map[string]*io_prometheus_client.MetricFamily {
-	req, err := http.NewRequest("GET", "/metrics", nil)
+	req, err := http.NewRequest(http.MethodGet, "/metrics", nil)
 	require.NoError(t, err)
 
 	rr := httptest.NewRecorder()

@@ -22,14 +22,19 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
-	"go.uber.org/atomic"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/connector"
+	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/otelcol/internal/grpclog"
+	"go.opentelemetry.io/collector/processor"
+	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/service"
 )
 
@@ -114,9 +119,11 @@ func NewCollector(set CollectorSettings) (*Collector, error) {
 		return nil, errors.New("invalid nil config provider")
 	}
 
+	state := &atomic.Int32{}
+	state.Store(int32(StateStarting))
 	return &Collector{
 		set:          set,
-		state:        atomic.NewInt32(int32(StateStarting)),
+		state:        state,
 		shutdownChan: make(chan struct{}),
 		// Per signal.Notify documentation, a size of the channel equaled with
 		// the number of signals getting notified on is recommended.
@@ -157,17 +164,14 @@ func (col *Collector) setupConfigurationComponents(ctx context.Context) error {
 	}
 
 	col.service, err = service.New(ctx, service.Settings{
-		BuildInfo:          col.set.BuildInfo,
-		ReceiverFactories:  col.set.Factories.Receivers,
-		ReceiverConfigs:    cfg.Receivers,
-		ProcessorFactories: col.set.Factories.Processors,
-		ProcessorConfigs:   cfg.Processors,
-		ExporterFactories:  col.set.Factories.Exporters,
-		ExporterConfigs:    cfg.Exporters,
-		ExtensionFactories: col.set.Factories.Extensions,
-		ExtensionConfigs:   cfg.Extensions,
-		AsyncErrorChannel:  col.asyncErrorChannel,
-		LoggingOptions:     col.set.LoggingOptions,
+		BuildInfo:         col.set.BuildInfo,
+		Receivers:         receiver.NewBuilder(cfg.Receivers, col.set.Factories.Receivers),
+		Processors:        processor.NewBuilder(cfg.Processors, col.set.Factories.Processors),
+		Exporters:         exporter.NewBuilder(cfg.Exporters, col.set.Factories.Exporters),
+		Connectors:        connector.NewBuilder(cfg.Connectors, col.set.Factories.Connectors),
+		Extensions:        extension.NewBuilder(cfg.Extensions, col.set.Factories.Extensions),
+		AsyncErrorChannel: col.asyncErrorChannel,
+		LoggingOptions:    col.set.LoggingOptions,
 	}, cfg.Service)
 	if err != nil {
 		return err

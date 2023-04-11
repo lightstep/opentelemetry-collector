@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,7 +29,6 @@ import (
 	"go.opencensus.io/metric/metricdata"
 	"go.opencensus.io/metric/metricproducer"
 	"go.opencensus.io/tag"
-	"go.uber.org/atomic"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -307,8 +307,9 @@ func TestQueuedRetry_DropOnFull(t *testing.T) {
 	t.Cleanup(func() {
 		assert.NoError(t, be.Shutdown(context.Background()))
 	})
-	err = be.sender.send(newMockRequest(context.Background(), 2, errors.New("transient error")))
-	require.Error(t, err)
+	ocs.run(func() {
+		require.Error(t, be.sender.send(newMockRequest(context.Background(), 2, errors.New("transient error"))))
+	})
 }
 
 func TestQueuedRetryHappyPath(t *testing.T) {
@@ -581,6 +582,52 @@ func TestQueuedRetryPersistenceEnabledStorageError(t *testing.T) {
 	require.Error(t, be.Start(context.Background(), host), "could not get storage client")
 }
 
+func TestQueuedRetryPersistentEnabled_shutdown_dataIsRequeued(t *testing.T) {
+
+	produceCounter := &atomic.Uint32{}
+
+	qCfg := NewDefaultQueueSettings()
+	qCfg.NumConsumers = 1
+	rCfg := NewDefaultRetrySettings()
+	rCfg.InitialInterval = time.Millisecond
+	rCfg.MaxElapsedTime = 0 // retry infinitely so shutdown can be triggered
+
+	req := newMockRequest(context.Background(), 3, errors.New("some error"))
+
+	be, err := newBaseExporter(defaultSettings, fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
+
+	require.NoError(t, be.Start(context.Background(), &mockHost{}))
+
+	// wraps original queue so we can count operations
+	be.qrSender.queue = &producerConsumerQueueWithCounter{
+		ProducerConsumerQueue: be.qrSender.queue,
+		produceCounter:        produceCounter,
+	}
+	be.qrSender.requeuingEnabled = true
+
+	// replace nextSender inside retrySender to always return error so it doesn't exit send loop
+	castedSender, ok := be.qrSender.consumerSender.(*retrySender)
+	require.True(t, ok, "consumerSender should be a retrySender type")
+	castedSender.nextSender = &errorRequestSender{
+		errToReturn: errors.New("some error"),
+	}
+
+	// Invoke queuedRetrySender so the producer will put the item for consumer to poll
+	require.NoError(t, be.sender.send(req))
+
+	// first wait for the item to be produced to the queue initially
+	assert.Eventually(t, func() bool {
+		return produceCounter.Load() == uint32(1)
+	}, time.Second, 1*time.Millisecond)
+
+	// shuts down and ensure the item is produced in the queue again
+	require.NoError(t, be.Shutdown(context.Background()))
+	assert.Eventually(t, func() bool {
+		return produceCounter.Load() == uint32(2)
+	}, time.Second, 1*time.Millisecond)
+}
+
 type mockErrorRequest struct {
 	baseRequest
 }
@@ -616,7 +663,7 @@ type mockRequest struct {
 }
 
 func (m *mockRequest) Export(ctx context.Context) error {
-	m.requestCount.Inc()
+	m.requestCount.Add(int64(1))
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	err := m.consumeError
@@ -657,7 +704,7 @@ func newMockRequest(ctx context.Context, cnt int, consumeError error) *mockReque
 		baseRequest:  baseRequest{ctx: ctx},
 		cnt:          cnt,
 		consumeError: consumeError,
-		requestCount: atomic.NewInt64(0),
+		requestCount: &atomic.Int64{},
 	}
 }
 
@@ -672,8 +719,8 @@ func newObservabilityConsumerSender(nextSender requestSender) *observabilityCons
 	return &observabilityConsumerSender{
 		waitGroup:         new(sync.WaitGroup),
 		nextSender:        nextSender,
-		droppedItemsCount: atomic.NewInt64(0),
-		sentItemsCount:    atomic.NewInt64(0),
+		droppedItemsCount: &atomic.Int64{},
+		sentItemsCount:    &atomic.Int64{},
 	}
 }
 
@@ -774,4 +821,22 @@ func (mse *mockStorageExtension) GetClient(_ context.Context, _ component.Kind, 
 		return nil, mse.GetClientError
 	}
 	return storage.NewNopClient(), nil
+}
+
+type producerConsumerQueueWithCounter struct {
+	internal.ProducerConsumerQueue
+	produceCounter *atomic.Uint32
+}
+
+func (pcq *producerConsumerQueueWithCounter) Produce(item internal.Request) bool {
+	pcq.produceCounter.Add(1)
+	return pcq.ProducerConsumerQueue.Produce(item)
+}
+
+type errorRequestSender struct {
+	errToReturn error
+}
+
+func (rs *errorRequestSender) send(_ internal.Request) error {
+	return rs.errToReturn
 }

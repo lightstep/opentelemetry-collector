@@ -29,12 +29,12 @@ type dataBuffer struct {
 	buf bytes.Buffer
 }
 
-func (b *dataBuffer) logEntry(format string, a ...interface{}) {
+func (b *dataBuffer) logEntry(format string, a ...any) {
 	b.buf.WriteString(fmt.Sprintf(format, a...))
 	b.buf.WriteString("\n")
 }
 
-func (b *dataBuffer) logAttr(attr string, value interface{}) {
+func (b *dataBuffer) logAttr(attr string, value any) {
 	b.logEntry("    %-15s: %s", attr, value)
 }
 
@@ -189,7 +189,7 @@ func (b *dataBuffer) logExponentialHistogramDataPoints(ps pmetric.ExponentialHis
 			index := p.Negative().Offset() + int32(pos)
 			lower := math.Exp(float64(index) * factor)
 			upper := math.Exp(float64(index+1) * factor)
-			b.logEntry("Bucket (%f, %f], Count: %d", -upper, -lower, negB.At(pos))
+			b.logEntry("Bucket [%f, %f), Count: %d", -upper, -lower, negB.At(pos))
 		}
 
 		if p.ZeroCount() != 0 {
@@ -200,7 +200,7 @@ func (b *dataBuffer) logExponentialHistogramDataPoints(ps pmetric.ExponentialHis
 			index := p.Positive().Offset() + int32(pos)
 			lower := math.Exp(float64(index) * factor)
 			upper := math.Exp(float64(index+1) * factor)
-			b.logEntry("Bucket [%f, %f), Count: %d", lower, upper, posB.At(pos))
+			b.logEntry("Bucket (%f, %f], Count: %d", lower, upper, posB.At(pos))
 		}
 	}
 }

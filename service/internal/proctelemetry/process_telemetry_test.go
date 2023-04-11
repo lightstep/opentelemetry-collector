@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,7 +39,6 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configtelemetry"
-	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/internal/obsreportconfig"
 )
 
@@ -101,7 +101,7 @@ func setupTelemetry(t *testing.T) testTelemetry {
 }
 
 func fetchPrometheusMetrics(handler http.Handler) (map[string]*io_prometheus_client.MetricFamily, error) {
-	req, err := http.NewRequest("GET", "/metrics", nil)
+	req, err := http.NewRequest(http.MethodGet, "/metrics", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -115,11 +115,8 @@ func fetchPrometheusMetrics(handler http.Handler) (map[string]*io_prometheus_cli
 
 func TestOtelProcessTelemetry(t *testing.T) {
 	tel := setupTelemetry(t)
-	registry := featuregate.NewRegistry()
-	obsreportconfig.RegisterInternalMetricFeatureGate(registry)
-	require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: true}))
 
-	require.NoError(t, RegisterProcessMetrics(context.Background(), nil, tel.MeterProvider, registry, 0))
+	require.NoError(t, RegisterProcessMetrics(nil, tel.MeterProvider, true, 0))
 
 	mp, err := fetchPrometheusMetrics(tel.promHandler)
 	require.NoError(t, err)
@@ -132,24 +129,26 @@ func TestOtelProcessTelemetry(t *testing.T) {
 		}
 		require.True(t, ok)
 		require.True(t, len(metric.Metric) == 1)
-		// require.True(t, metric.GetType() == io_prometheus_client.MetricType_COUNTER)
 		var metricValue float64
 		if metric.GetType() == io_prometheus_client.MetricType_COUNTER {
 			metricValue = metric.Metric[0].GetCounter().GetValue()
 		} else {
 			metricValue = metric.Metric[0].GetGauge().GetValue()
 		}
-		assert.True(t, metricValue > 0)
+		if strings.HasPrefix(metricName, "process_uptime") || strings.HasPrefix(metricName, "process_cpu_seconds") {
+			// This likely will still be zero when running the test.
+			assert.GreaterOrEqual(t, metricValue, float64(0), metricName)
+			continue
+		}
+
+		assert.Greater(t, metricValue, float64(0), metricName)
 	}
 }
 
 func TestOCProcessTelemetry(t *testing.T) {
 	ocRegistry := metric.NewRegistry()
-	registry := featuregate.NewRegistry()
-	obsreportconfig.RegisterInternalMetricFeatureGate(registry)
-	require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: false}))
 
-	require.NoError(t, RegisterProcessMetrics(context.Background(), ocRegistry, otelmetric.NewNoopMeterProvider(), registry, 0))
+	require.NoError(t, RegisterProcessMetrics(ocRegistry, otelmetric.NewNoopMeterProvider(), false, 0))
 
 	// Check that the metrics are actually filled.
 	<-time.After(200 * time.Millisecond)
@@ -173,24 +172,21 @@ func TestOCProcessTelemetry(t *testing.T) {
 
 		if metricName == "process/uptime" || metricName == "process/cpu_seconds" {
 			// This likely will still be zero when running the test.
-			assert.True(t, value >= 0, metricName)
+			assert.GreaterOrEqual(t, value, float64(0), metricName)
 			continue
 		}
 
-		assert.True(t, value > 0, metricName)
+		assert.Greater(t, value, float64(0), metricName)
 	}
 }
 
 func TestProcessTelemetryFailToRegister(t *testing.T) {
-	registry := featuregate.NewRegistry()
-	obsreportconfig.RegisterInternalMetricFeatureGate(registry)
-	require.NoError(t, registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: false}))
 	for _, metricName := range expectedMetrics {
 		t.Run(metricName, func(t *testing.T) {
 			ocRegistry := metric.NewRegistry()
 			_, err := ocRegistry.AddFloat64Gauge(metricName)
 			require.NoError(t, err)
-			assert.Error(t, RegisterProcessMetrics(context.Background(), ocRegistry, otelmetric.NewNoopMeterProvider(), registry, 0))
+			assert.Error(t, RegisterProcessMetrics(ocRegistry, otelmetric.NewNoopMeterProvider(), false, 0))
 		})
 	}
 }

@@ -13,22 +13,17 @@
 // limitations under the License.
 
 // Package memorylimiterprocessor provides a processor for OpenTelemetry Service pipeline
-// that drops data on the pipeline according to the current state of memory
-// usage.
+// that refuses data on the pipeline according to the current state of memory usage.
 package memorylimiterprocessor // import "go.opentelemetry.io/collector/processor/memorylimiterprocessor"
 
 import (
 	"time"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 )
 
 // Config defines configuration for memory memoryLimiter processor.
 type Config struct {
-	// Deprecated: [v0.68.0] will be removed soon.
-	config.ProcessorSettings `mapstructure:",squash"`
-
 	// CheckInterval is the time between measurements of memory usage for the
 	// purposes of avoiding going over the limits. Defaults to zero, so no
 	// checks will be performed.

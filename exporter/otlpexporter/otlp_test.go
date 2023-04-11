@@ -20,12 +20,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -36,6 +36,7 @@ import (
 
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configgrpc"
+	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exportertest"
@@ -70,12 +71,13 @@ func (r *mockReceiver) setExportError(err error) {
 }
 
 type mockTracesReceiver struct {
+	ptraceotlp.UnimplementedGRPCServer
 	mockReceiver
 	lastRequest ptrace.Traces
 }
 
 func (r *mockTracesReceiver) Export(ctx context.Context, req ptraceotlp.ExportRequest) (ptraceotlp.ExportResponse, error) {
-	r.requestCount.Inc()
+	r.requestCount.Add(int32(1))
 	td := req.Traces()
 	r.totalItems.Add(int32(td.SpanCount()))
 	r.mux.Lock()
@@ -110,8 +112,8 @@ func otlpTracesReceiverOnGRPCServer(ln net.Listener, useTLS bool) (*mockTracesRe
 	rcv := &mockTracesReceiver{
 		mockReceiver: mockReceiver{
 			srv:          grpc.NewServer(sopts...),
-			requestCount: atomic.NewInt32(0),
-			totalItems:   atomic.NewInt32(0),
+			requestCount: &atomic.Int32{},
+			totalItems:   &atomic.Int32{},
 		},
 	}
 
@@ -125,12 +127,13 @@ func otlpTracesReceiverOnGRPCServer(ln net.Listener, useTLS bool) (*mockTracesRe
 }
 
 type mockLogsReceiver struct {
+	plogotlp.UnimplementedGRPCServer
 	mockReceiver
 	lastRequest plog.Logs
 }
 
 func (r *mockLogsReceiver) Export(ctx context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
-	r.requestCount.Inc()
+	r.requestCount.Add(int32(1))
 	ld := req.Logs()
 	r.totalItems.Add(int32(ld.LogRecordCount()))
 	r.mux.Lock()
@@ -150,8 +153,8 @@ func otlpLogsReceiverOnGRPCServer(ln net.Listener) *mockLogsReceiver {
 	rcv := &mockLogsReceiver{
 		mockReceiver: mockReceiver{
 			srv:          grpc.NewServer(),
-			requestCount: atomic.NewInt32(0),
-			totalItems:   atomic.NewInt32(0),
+			requestCount: &atomic.Int32{},
+			totalItems:   &atomic.Int32{},
 		},
 	}
 
@@ -165,13 +168,14 @@ func otlpLogsReceiverOnGRPCServer(ln net.Listener) *mockLogsReceiver {
 }
 
 type mockMetricsReceiver struct {
+	pmetricotlp.UnimplementedGRPCServer
 	mockReceiver
 	lastRequest pmetric.Metrics
 }
 
 func (r *mockMetricsReceiver) Export(ctx context.Context, req pmetricotlp.ExportRequest) (pmetricotlp.ExportResponse, error) {
 	md := req.Metrics()
-	r.requestCount.Inc()
+	r.requestCount.Add(int32(1))
 	r.totalItems.Add(int32(md.DataPointCount()))
 	r.mux.Lock()
 	defer r.mux.Unlock()
@@ -190,8 +194,8 @@ func otlpMetricsReceiverOnGRPCServer(ln net.Listener) *mockMetricsReceiver {
 	rcv := &mockMetricsReceiver{
 		mockReceiver: mockReceiver{
 			srv:          grpc.NewServer(),
-			requestCount: atomic.NewInt32(0),
-			totalItems:   atomic.NewInt32(0),
+			requestCount: &atomic.Int32{},
+			totalItems:   &atomic.Int32{},
 		},
 	}
 
@@ -220,7 +224,7 @@ func TestSendTraces(t *testing.T) {
 		TLSSetting: configtls.TLSClientSetting{
 			Insecure: true,
 		},
-		Headers: map[string]string{
+		Headers: map[string]configopaque.String{
 			"header": "header-value",
 		},
 	}
@@ -366,7 +370,7 @@ func TestSendMetrics(t *testing.T) {
 		TLSSetting: configtls.TLSClientSetting{
 			Insecure: true,
 		},
-		Headers: map[string]string{
+		Headers: map[string]configopaque.String{
 			"header": "header-value",
 		},
 	}

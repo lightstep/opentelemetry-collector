@@ -17,7 +17,6 @@ package otelcol // import "go.opentelemetry.io/collector/otelcol"
 import (
 	"go.uber.org/zap/zapcore"
 
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/connector"
@@ -36,7 +35,7 @@ type configSettings struct {
 	Exporters  *configunmarshaler.Configs[exporter.Factory]  `mapstructure:"exporters"`
 	Connectors *configunmarshaler.Configs[connector.Factory] `mapstructure:"connectors"`
 	Extensions *configunmarshaler.Configs[extension.Factory] `mapstructure:"extensions"`
-	Service    service.ConfigService                         `mapstructure:"service"`
+	Service    service.Config                                `mapstructure:"service"`
 }
 
 // unmarshal the configSettings from a confmap.Conf.
@@ -47,10 +46,10 @@ func unmarshal(v *confmap.Conf, factories Factories) (*configSettings, error) {
 		Receivers:  configunmarshaler.NewConfigs(factories.Receivers),
 		Processors: configunmarshaler.NewConfigs(factories.Processors),
 		Exporters:  configunmarshaler.NewConfigs(factories.Exporters),
-		Connectors: configunmarshaler.NewConfigs(map[component.Type]connector.Factory{}),
+		Connectors: configunmarshaler.NewConfigs(factories.Connectors),
 		Extensions: configunmarshaler.NewConfigs(factories.Extensions),
 		// TODO: Add a component.ServiceFactory to allow this to be defined by the Service.
-		Service: service.ConfigService{
+		Service: service.Config{
 			Telemetry: telemetry.Config{
 				Logs: telemetry.LogsConfig{
 					Level:       zapcore.InfoLevel,
@@ -64,7 +63,7 @@ func unmarshal(v *confmap.Conf, factories Factories) (*configSettings, error) {
 					ErrorOutputPaths:  []string{"stderr"},
 					DisableCaller:     false,
 					DisableStacktrace: false,
-					InitialFields:     map[string]interface{}(nil),
+					InitialFields:     map[string]any(nil),
 				},
 				Metrics: telemetry.MetricsConfig{
 					Level:   configtelemetry.LevelBasic,

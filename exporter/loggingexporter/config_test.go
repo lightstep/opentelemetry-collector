@@ -74,6 +74,10 @@ func TestUnmarshalConfig(t *testing.T) {
 			filename:    "invalid_verbosity_loglevel.yaml",
 			expectedErr: "'loglevel' and 'verbosity' are incompatible. Use only 'verbosity' instead",
 		},
+		{
+			filename:    "config_loglevel_typo.yaml",
+			expectedErr: "1 error(s) decoding:\n\n* '' has invalid keys: logLevel",
+		},
 	}
 
 	for _, tt := range tests {
@@ -89,6 +93,68 @@ func TestUnmarshalConfig(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.cfg, cfg)
 			}
+		})
+	}
+}
+
+func Test_UnmarshalMarshalled(t *testing.T) {
+	for name, tc := range map[string]struct {
+		inCfg          *Config
+		expectedConfig *Config
+		expectedErr    string
+	}{
+		"Base": {
+			inCfg:          &Config{},
+			expectedConfig: &Config{},
+		},
+		"VerbositySpecified": {
+			inCfg: &Config{
+				Verbosity: configtelemetry.LevelDetailed,
+			},
+			expectedConfig: &Config{
+				Verbosity: configtelemetry.LevelDetailed,
+			},
+		},
+		"LogLevelSpecified": {
+			inCfg: &Config{
+				LogLevel: zapcore.DebugLevel,
+			},
+			expectedConfig: &Config{
+				LogLevel:     zapcore.DebugLevel,
+				Verbosity:    configtelemetry.LevelDetailed,
+				warnLogLevel: true,
+			},
+		},
+		"SpecifiedLogLevelExpectedErr": {
+			inCfg: &Config{
+				// Cannot specify both log level and verbosity so an error is expected
+				LogLevel:  zapcore.DebugLevel,
+				Verbosity: configtelemetry.LevelNormal,
+			},
+			expectedErr: "'loglevel' and 'verbosity' are incompatible. Use only 'verbosity' instead",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+
+			conf := confmap.New()
+			err := conf.Marshal(tc.inCfg)
+			assert.NoError(t, err)
+
+			raw := conf.ToStringMap()
+
+			conf = confmap.NewFromStringMap(raw)
+
+			outCfg := &Config{}
+
+			err = component.UnmarshalConfig(conf, outCfg)
+
+			if tc.expectedErr == "" {
+				assert.NoError(t, err)
+				assert.Equal(t, outCfg, tc.expectedConfig)
+				return
+			}
+			assert.Error(t, err)
+			assert.EqualError(t, err, tc.expectedErr)
 		})
 	}
 }

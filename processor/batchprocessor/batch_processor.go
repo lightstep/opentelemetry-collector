@@ -25,7 +25,6 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
-	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -48,7 +47,7 @@ type batchProcessor struct {
 	sendBatchSize    int
 	sendBatchMaxSize int
 
-	newItem chan interface{}
+	newItem chan any
 	batch   batch
 
 	shutdownC  chan struct{}
@@ -65,15 +64,15 @@ type batch interface {
 	itemCount() int
 
 	// add item to the current batch
-	add(item interface{})
+	add(item any)
 }
 
 var _ consumer.Traces = (*batchProcessor)(nil)
 var _ consumer.Metrics = (*batchProcessor)(nil)
 var _ consumer.Logs = (*batchProcessor)(nil)
 
-func newBatchProcessor(set processor.CreateSettings, cfg *Config, batch batch, registry *featuregate.Registry) (*batchProcessor, error) {
-	bpt, err := newBatchProcessorTelemetry(set, registry)
+func newBatchProcessor(set processor.CreateSettings, cfg *Config, batch batch, useOtel bool) (*batchProcessor, error) {
+	bpt, err := newBatchProcessorTelemetry(set, useOtel)
 	if err != nil {
 		return nil, fmt.Errorf("error to create batch processor telemetry %w", err)
 	}
@@ -86,7 +85,7 @@ func newBatchProcessor(set processor.CreateSettings, cfg *Config, batch batch, r
 		sendBatchSize:    int(cfg.SendBatchSize),
 		sendBatchMaxSize: int(cfg.SendBatchMaxSize),
 		timeout:          cfg.Timeout,
-		newItem:          make(chan interface{}, runtime.NumCPU()),
+		newItem:          make(chan any, runtime.NumCPU()),
 		batch:            batch,
 		shutdownC:        make(chan struct{}, 1),
 	}, nil
@@ -114,7 +113,14 @@ func (bp *batchProcessor) Shutdown(context.Context) error {
 
 func (bp *batchProcessor) startProcessingCycle() {
 	defer bp.goroutines.Done()
-	bp.timer = time.NewTimer(bp.timeout)
+
+	// timerCh ensures we only block when there is a
+	// timer, since <- from a nil channel is blocking.
+	var timerCh <-chan time.Time
+	if bp.timeout != 0 && bp.sendBatchSize != 0 {
+		bp.timer = time.NewTimer(bp.timeout)
+		timerCh = bp.timer.C
+	}
 	for {
 		select {
 		case <-bp.shutdownC:
@@ -139,7 +145,7 @@ func (bp *batchProcessor) startProcessingCycle() {
 				continue
 			}
 			bp.processItem(item)
-		case <-bp.timer.C:
+		case <-timerCh:
 			if bp.batch.itemCount() > 0 {
 				bp.sendItems(triggerTimeout)
 			}
@@ -148,10 +154,10 @@ func (bp *batchProcessor) startProcessingCycle() {
 	}
 }
 
-func (bp *batchProcessor) processItem(item interface{}) {
+func (bp *batchProcessor) processItem(item any) {
 	bp.batch.add(item)
 	sent := false
-	for bp.batch.itemCount() >= bp.sendBatchSize {
+	for bp.batch.itemCount() > 0 && (!bp.hasTimer() || bp.batch.itemCount() >= bp.sendBatchSize) {
 		sent = true
 		bp.sendItems(triggerBatchSize)
 	}
@@ -162,14 +168,20 @@ func (bp *batchProcessor) processItem(item interface{}) {
 	}
 }
 
+func (bp *batchProcessor) hasTimer() bool {
+	return bp.timer != nil
+}
+
 func (bp *batchProcessor) stopTimer() {
-	if !bp.timer.Stop() {
+	if bp.hasTimer() && !bp.timer.Stop() {
 		<-bp.timer.C
 	}
 }
 
 func (bp *batchProcessor) resetTimer() {
-	bp.timer.Reset(bp.timeout)
+	if bp.hasTimer() {
+		bp.timer.Reset(bp.timeout)
+	}
 }
 
 func (bp *batchProcessor) sendItems(trigger trigger) {
@@ -201,18 +213,18 @@ func (bp *batchProcessor) ConsumeLogs(_ context.Context, ld plog.Logs) error {
 }
 
 // newBatchTracesProcessor creates a new batch processor that batches traces by size or with timeout
-func newBatchTracesProcessor(set processor.CreateSettings, next consumer.Traces, cfg *Config, registry *featuregate.Registry) (*batchProcessor, error) {
-	return newBatchProcessor(set, cfg, newBatchTraces(next), registry)
+func newBatchTracesProcessor(set processor.CreateSettings, next consumer.Traces, cfg *Config, useOtel bool) (*batchProcessor, error) {
+	return newBatchProcessor(set, cfg, newBatchTraces(next), useOtel)
 }
 
 // newBatchMetricsProcessor creates a new batch processor that batches metrics by size or with timeout
-func newBatchMetricsProcessor(set processor.CreateSettings, next consumer.Metrics, cfg *Config, registry *featuregate.Registry) (*batchProcessor, error) {
-	return newBatchProcessor(set, cfg, newBatchMetrics(next), registry)
+func newBatchMetricsProcessor(set processor.CreateSettings, next consumer.Metrics, cfg *Config, useOtel bool) (*batchProcessor, error) {
+	return newBatchProcessor(set, cfg, newBatchMetrics(next), useOtel)
 }
 
 // newBatchLogsProcessor creates a new batch processor that batches logs by size or with timeout
-func newBatchLogsProcessor(set processor.CreateSettings, next consumer.Logs, cfg *Config, registry *featuregate.Registry) (*batchProcessor, error) {
-	return newBatchProcessor(set, cfg, newBatchLogs(next), registry)
+func newBatchLogsProcessor(set processor.CreateSettings, next consumer.Logs, cfg *Config, useOtel bool) (*batchProcessor, error) {
+	return newBatchProcessor(set, cfg, newBatchLogs(next), useOtel)
 }
 
 type batchTraces struct {
@@ -227,7 +239,7 @@ func newBatchTraces(nextConsumer consumer.Traces) *batchTraces {
 }
 
 // add updates current batchTraces by adding new TraceData object
-func (bt *batchTraces) add(item interface{}) {
+func (bt *batchTraces) add(item any) {
 	td := item.(ptrace.Traces)
 	newSpanCount := td.SpanCount()
 	if newSpanCount == 0 {
@@ -297,7 +309,7 @@ func (bm *batchMetrics) itemCount() int {
 	return bm.dataPointCount
 }
 
-func (bm *batchMetrics) add(item interface{}) {
+func (bm *batchMetrics) add(item any) {
 	md := item.(pmetric.Metrics)
 
 	newDataPointCount := md.DataPointCount()
@@ -323,6 +335,7 @@ func (bl *batchLogs) export(ctx context.Context, sendBatchMaxSize int, returnByt
 	var req plog.Logs
 	var sent int
 	var bytes int
+
 	if sendBatchMaxSize > 0 && bl.logCount > sendBatchMaxSize {
 		req = splitLogs(sendBatchMaxSize, bl.logData)
 		bl.logCount -= sendBatchMaxSize
@@ -343,7 +356,7 @@ func (bl *batchLogs) itemCount() int {
 	return bl.logCount
 }
 
-func (bl *batchLogs) add(item interface{}) {
+func (bl *batchLogs) add(item any) {
 	ld := item.(plog.Logs)
 
 	newLogsCount := ld.LogRecordCount()

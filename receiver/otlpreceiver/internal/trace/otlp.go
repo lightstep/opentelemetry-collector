@@ -22,13 +22,11 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 )
 
-const (
-	dataFormatProtobuf = "protobuf"
-	receiverTransport  = "grpc"
-)
+const dataFormatProtobuf = "protobuf"
 
 // Receiver is the type used to handle spans from OpenTelemetry exporters.
 type Receiver struct {
+	ptraceotlp.UnimplementedGRPCServer
 	nextConsumer consumer.Traces
 	obsrecv      *obsreport.Receiver
 }

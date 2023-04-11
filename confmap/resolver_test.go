@@ -19,6 +19,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,12 +27,12 @@ import (
 )
 
 type mockProvider struct {
-	scheme string
-	retM   interface{}
-	errR   error
-	errS   error
-	errW   error
-	errC   error
+	scheme    string
+	retM      any
+	errR      error
+	errS      error
+	errW      error
+	closeFunc func(ctx context.Context) error
 }
 
 func (m *mockProvider) Retrieve(_ context.Context, _ string, watcher WatcherFunc) (*Retrieved, error) {
@@ -43,7 +44,7 @@ func (m *mockProvider) Retrieve(_ context.Context, _ string, watcher WatcherFunc
 	}
 
 	watcher(&ChangeEvent{Error: m.errW})
-	return NewRetrieved(m.retM, WithRetrievedClose(func(ctx context.Context) error { return m.errC }))
+	return NewRetrieved(m.retM, WithRetrievedClose(m.closeFunc))
 }
 
 func (m *mockProvider) Scheme() string {
@@ -148,7 +149,7 @@ func TestResolverErrors(t *testing.T) {
 			locations: []string{"mock:", "err:"},
 			providers: []Provider{
 				&mockProvider{},
-				&mockProvider{scheme: "err", retM: map[string]interface{}{}, errW: errors.New("watch_err")},
+				&mockProvider{scheme: "err", retM: map[string]any{}, errW: errors.New("watch_err")},
 			},
 			expectWatchErr: true,
 		},
@@ -157,7 +158,7 @@ func TestResolverErrors(t *testing.T) {
 			locations: []string{"mock:", "err:"},
 			providers: []Provider{
 				&mockProvider{},
-				&mockProvider{scheme: "err", retM: map[string]interface{}{}, errC: errors.New("close_err")},
+				&mockProvider{scheme: "err", retM: map[string]any{}, closeFunc: func(ctx context.Context) error { return errors.New("close_err") }},
 			},
 			expectCloseErr: true,
 		},
@@ -166,7 +167,7 @@ func TestResolverErrors(t *testing.T) {
 			locations: []string{"mock:", "err:"},
 			providers: []Provider{
 				&mockProvider{},
-				&mockProvider{scheme: "err", retM: map[string]interface{}{}, errS: errors.New("close_err")},
+				&mockProvider{scheme: "err", retM: map[string]any{}, errS: errors.New("close_err")},
 			},
 			expectShutdownErr: true,
 		},
@@ -269,13 +270,18 @@ func TestBackwardsCompatibilityForFilePath(t *testing.T) {
 }
 
 func TestResolver(t *testing.T) {
+	numCalls := atomic.Int32{}
 	resolver, err := NewResolver(ResolverSettings{
-		URIs:       []string{"mock:"},
-		Providers:  makeMapProvidersMap(&mockProvider{retM: newConfFromFile(t, filepath.Join("testdata", "config.yaml"))}),
+		URIs: []string{"mock:"},
+		Providers: makeMapProvidersMap(&mockProvider{retM: map[string]any{}, closeFunc: func(ctx context.Context) error {
+			numCalls.Add(1)
+			return nil
+		}}),
 		Converters: nil})
 	require.NoError(t, err)
 	_, errN := resolver.Resolve(context.Background())
 	assert.NoError(t, errN)
+	assert.Equal(t, int32(0), numCalls.Load())
 
 	errW := <-resolver.Watch()
 	assert.NoError(t, errW)
@@ -284,18 +290,24 @@ func TestResolver(t *testing.T) {
 
 	_, errN = resolver.Resolve(context.Background())
 	assert.NoError(t, errN)
+	assert.Equal(t, int32(1), numCalls.Load())
 
 	errW = <-resolver.Watch()
 	assert.NoError(t, errW)
 
+	_, errN = resolver.Resolve(context.Background())
+	assert.NoError(t, errN)
+	assert.Equal(t, int32(2), numCalls.Load())
+
 	errC := resolver.Shutdown(context.Background())
 	assert.NoError(t, errC)
+	assert.Equal(t, int32(3), numCalls.Load())
 }
 
 func TestResolverNewLinesInOpaqueValue(t *testing.T) {
 	_, err := NewResolver(ResolverSettings{
 		URIs:       []string{"mock:receivers:\n nop:\n"},
-		Providers:  makeMapProvidersMap(&mockProvider{retM: newConfFromFile(t, filepath.Join("testdata", "config.yaml"))}),
+		Providers:  makeMapProvidersMap(&mockProvider{retM: map[string]any{}}),
 		Converters: nil})
 	assert.NoError(t, err)
 }
@@ -380,7 +392,7 @@ func TestResolverExpandEnvVars(t *testing.T) {
 }
 
 func TestResolverDoneNotExpandOldEnvVars(t *testing.T) {
-	expectedCfgMap := map[string]interface{}{"test.1": "${EXTRA}", "test.2": "$EXTRA", "test.3": "${EXTRA}:${EXTRA}"}
+	expectedCfgMap := map[string]any{"test.1": "${EXTRA}", "test.2": "$EXTRA", "test.3": "${EXTRA}:${EXTRA}"}
 	fileProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
 		return NewRetrieved(expectedCfgMap)
 	})
@@ -402,9 +414,9 @@ func TestResolverDoneNotExpandOldEnvVars(t *testing.T) {
 
 func TestResolverExpandMapAndSliceValues(t *testing.T) {
 	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(map[string]interface{}{
-			"test_map":   map[string]interface{}{"recv": "${test:MAP_VALUE}"},
-			"test_slice": []interface{}{"${test:MAP_VALUE}"}})
+		return NewRetrieved(map[string]any{
+			"test_map":   map[string]any{"recv": "${test:MAP_VALUE}"},
+			"test_slice": []any{"${test:MAP_VALUE}"}})
 	})
 
 	const receiverExtraMapValue = "some map value"
@@ -417,16 +429,171 @@ func TestResolverExpandMapAndSliceValues(t *testing.T) {
 
 	cfgMap, err := resolver.Resolve(context.Background())
 	require.NoError(t, err)
-	expectedMap := map[string]interface{}{
-		"test_map":   map[string]interface{}{"recv": receiverExtraMapValue},
-		"test_slice": []interface{}{receiverExtraMapValue}}
+	expectedMap := map[string]any{
+		"test_map":   map[string]any{"recv": receiverExtraMapValue},
+		"test_slice": []any{receiverExtraMapValue}}
 	assert.Equal(t, expectedMap, cfgMap.ToStringMap())
 }
 
+func TestResolverExpandStringValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		output any
+	}{
+		{
+			name:   "test_no_match_old",
+			input:  "${HOST}:${PORT}",
+			output: "${HOST}:${PORT}",
+		},
+		{
+			name:   "test_no_match_old_no_brackets",
+			input:  "${HOST}:$PORT",
+			output: "${HOST}:$PORT",
+		},
+		{
+			name:   "test_match_value",
+			input:  "${env:COMPLEX_VALUE}",
+			output: []any{"localhost:3042"},
+		},
+		{
+			name:   "test_match_embedded",
+			input:  "${env:HOST}:3043",
+			output: "localhost:3043",
+		},
+		{
+			name:   "test_match_embedded_multi",
+			input:  "${env:HOST}:${env:PORT}",
+			output: "localhost:3044",
+		},
+		{
+			name:   "test_match_embedded_concat",
+			input:  "https://${env:HOST}:3045",
+			output: "https://localhost:3045",
+		},
+		{
+			name:   "test_match_embedded_new_and_old",
+			input:  "${env:HOST}:${PORT}",
+			output: "localhost:${PORT}",
+		},
+		{
+			name:   "test_match_int",
+			input:  "test_${env:INT}",
+			output: "test_1",
+		},
+		{
+			name:   "test_match_int32",
+			input:  "test_${env:INT32}",
+			output: "test_32",
+		},
+		{
+			name:   "test_match_int64",
+			input:  "test_${env:INT64}",
+			output: "test_64",
+		},
+		{
+			name:   "test_match_float32",
+			input:  "test_${env:FLOAT32}",
+			output: "test_3.25",
+		},
+		{
+			name:   "test_match_float64",
+			input:  "test_${env:FLOAT64}",
+			output: "test_6.4",
+		},
+		{
+			name:   "test_match_bool",
+			input:  "test_${env:BOOL}",
+			output: "test_true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+				return NewRetrieved(map[string]any{tt.name: tt.input})
+			})
+
+			testProvider := newFakeProvider("env", func(_ context.Context, uri string, _ WatcherFunc) (*Retrieved, error) {
+				switch uri {
+				case "env:COMPLEX_VALUE":
+					return NewRetrieved([]any{"localhost:3042"})
+				case "env:HOST":
+					return NewRetrieved("localhost")
+				case "env:PORT":
+					return NewRetrieved(3044)
+				case "env:INT":
+					return NewRetrieved(1)
+				case "env:INT32":
+					return NewRetrieved(32)
+				case "env:INT64":
+					return NewRetrieved(64)
+				case "env:FLOAT32":
+					return NewRetrieved(float32(3.25))
+				case "env:FLOAT64":
+					return NewRetrieved(float64(6.4))
+				case "env:BOOL":
+					return NewRetrieved(true)
+				}
+				return nil, errors.New("impossible")
+			})
+
+			resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
+			require.NoError(t, err)
+
+			cfgMap, err := resolver.Resolve(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{tt.name: tt.output}, cfgMap.ToStringMap())
+		})
+	}
+}
+
+func TestResolverExpandReturnError(t *testing.T) {
+	tests := []struct {
+		name  string
+		input any
+	}{
+		{
+			name:  "string_value",
+			input: "${test:VALUE}",
+		},
+		{
+			name:  "slice_value",
+			input: []any{"${test:VALUE}"},
+		},
+		{
+			name:  "map_value",
+			input: map[string]any{"test": "${test:VALUE}"},
+		},
+		{
+			name:  "string_embedded_value",
+			input: "https://${test:HOST}:3045",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+				return NewRetrieved(map[string]any{tt.name: tt.input})
+			})
+
+			myErr := errors.New(tt.name)
+			testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+				return nil, myErr
+			})
+
+			resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
+			require.NoError(t, err)
+
+			_, err = resolver.Resolve(context.Background())
+			assert.ErrorIs(t, err, myErr)
+		})
+	}
+}
 func TestResolverInfiniteExpand(t *testing.T) {
 	const receiverValue = "${test:VALUE}"
 	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(map[string]interface{}{"test": receiverValue})
+		return NewRetrieved(map[string]any{"test": receiverValue})
 	})
 
 	testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
@@ -440,46 +607,13 @@ func TestResolverInfiniteExpand(t *testing.T) {
 	assert.ErrorIs(t, err, errTooManyRecursiveExpansions)
 }
 
-func TestResolverExpandSliceValueError(t *testing.T) {
-	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(map[string]interface{}{"test": []interface{}{"${test:VALUE}"}})
-	})
-
-	testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(errors.New("invalid value"))
-	})
-
-	resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
-	require.NoError(t, err)
-
-	_, err = resolver.Resolve(context.Background())
-	assert.EqualError(t, err, "unsupported type=*errors.errorString for retrieved config")
-}
-
-func TestResolverExpandMapValueError(t *testing.T) {
-	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(map[string]interface{}{"test": []interface{}{map[string]interface{}{"test": "${test:VALUE}"}}})
-	})
-
-	testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(errors.New("invalid value"))
-	})
-
-	resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
-	require.NoError(t, err)
-
-	_, err = resolver.Resolve(context.Background())
-	assert.EqualError(t, err, "unsupported type=*errors.errorString for retrieved config")
-}
-
 func TestResolverExpandInvalidScheme(t *testing.T) {
-	const receiverValue = "${g_c_s:VALUE}"
 	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(map[string]interface{}{"test": receiverValue})
+		return NewRetrieved(map[string]any{"test": "${g_c_s:VALUE}"})
 	})
 
 	testProvider := newFakeProvider("g_c_s", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(receiverValue)
+		panic("must not be called")
 	})
 
 	resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
@@ -493,11 +627,11 @@ func TestResolverExpandInvalidScheme(t *testing.T) {
 
 func TestResolverExpandInvalidOpaqueValue(t *testing.T) {
 	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(map[string]interface{}{"test": []interface{}{map[string]interface{}{"test": "${test:$VALUE}"}}})
+		return NewRetrieved(map[string]any{"test": []any{map[string]any{"test": "${test:$VALUE}"}}})
 	})
 
 	testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
-		return NewRetrieved(errors.New("invalid value"))
+		panic("must not be called")
 	})
 
 	resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
@@ -505,6 +639,38 @@ func TestResolverExpandInvalidOpaqueValue(t *testing.T) {
 
 	_, err = resolver.Resolve(context.Background())
 	assert.EqualError(t, err, `the uri "test:$VALUE" contains unsupported characters ('$')`)
+}
+
+func TestResolverExpandUnsupportedScheme(t *testing.T) {
+	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+		return NewRetrieved(map[string]any{"test": "${unsupported:VALUE}"})
+	})
+
+	testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+		panic("must not be called")
+	})
+
+	resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
+	require.NoError(t, err)
+
+	_, err = resolver.Resolve(context.Background())
+	assert.EqualError(t, err, `scheme "unsupported" is not supported for uri "unsupported:VALUE"`)
+}
+
+func TestResolverExpandStringValueInvalidReturnValue(t *testing.T) {
+	provider := newFakeProvider("input", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+		return NewRetrieved(map[string]any{"test": "localhost:${test:PORT}"})
+	})
+
+	testProvider := newFakeProvider("test", func(context.Context, string, WatcherFunc) (*Retrieved, error) {
+		return NewRetrieved([]any{1243})
+	})
+
+	resolver, err := NewResolver(ResolverSettings{URIs: []string{"input:"}, Providers: makeMapProvidersMap(provider, testProvider), Converters: nil})
+	require.NoError(t, err)
+
+	_, err = resolver.Resolve(context.Background())
+	assert.EqualError(t, err, `expanding ${test:PORT}, expected string value type, got []interface {}`)
 }
 
 func makeMapProvidersMap(providers ...Provider) map[string]Provider {
